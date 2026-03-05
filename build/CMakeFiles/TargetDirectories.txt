@@ -1,0 +1,3 @@
+/mnt/c/Users/Alexey/Desktop/min/vNE/vEPC/build/CMakeFiles/vepc.dir
+/mnt/c/Users/Alexey/Desktop/min/vNE/vEPC/build/CMakeFiles/edit_cache.dir
+/mnt/c/Users/Alexey/Desktop/min/vNE/vEPC/build/CMakeFiles/rebuild_cache.dir
