@@ -54,16 +54,17 @@ RM = /usr/bin/cmake -E rm -f
 EQUALS = =
 
 # The top-level source directory on which CMake was run.
-CMAKE_SOURCE_DIR = /mnt/c/Users/Alexey/Desktop/min/vNE/vEPC
+CMAKE_SOURCE_DIR = /mnt/c/Users/Alexey/Desktop/min/vne/vepc
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = /mnt/c/Users/Alexey/Desktop/min/vNE/vEPC/build
+CMAKE_BINARY_DIR = /mnt/c/Users/Alexey/Desktop/min/vne/vepc/build
 
 #=============================================================================
 # Directory level rules for the build root directory
 
 # The main recursive "all" target.
 all: CMakeFiles/vepc.dir/all
+all: CMakeFiles/vepc-cli.dir/all
 .PHONY : all
 
 # The main recursive "preinstall" target.
@@ -72,6 +73,7 @@ preinstall:
 
 # The main recursive "clean" target.
 clean: CMakeFiles/vepc.dir/clean
+clean: CMakeFiles/vepc-cli.dir/clean
 .PHONY : clean
 
 #=============================================================================
@@ -81,14 +83,14 @@ clean: CMakeFiles/vepc.dir/clean
 CMakeFiles/vepc.dir/all:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/vepc.dir/build.make CMakeFiles/vepc.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/vepc.dir/build.make CMakeFiles/vepc.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/mnt/c/Users/Alexey/Desktop/min/vNE/vEPC/build/CMakeFiles --progress-num=1,2 "Built target vepc"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/mnt/c/Users/Alexey/Desktop/min/vne/vepc/build/CMakeFiles --progress-num=1,2 "Built target vepc"
 .PHONY : CMakeFiles/vepc.dir/all
 
 # Build rule for subdir invocation for target.
 CMakeFiles/vepc.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/Alexey/Desktop/min/vNE/vEPC/build/CMakeFiles 2
+	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/Alexey/Desktop/min/vne/vepc/build/CMakeFiles 2
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/vepc.dir/all
-	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/Alexey/Desktop/min/vNE/vEPC/build/CMakeFiles 0
+	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/Alexey/Desktop/min/vne/vepc/build/CMakeFiles 0
 .PHONY : CMakeFiles/vepc.dir/rule
 
 # Convenience name for target.
@@ -99,6 +101,32 @@ vepc: CMakeFiles/vepc.dir/rule
 CMakeFiles/vepc.dir/clean:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/vepc.dir/build.make CMakeFiles/vepc.dir/clean
 .PHONY : CMakeFiles/vepc.dir/clean
+
+#=============================================================================
+# Target rules for target CMakeFiles/vepc-cli.dir
+
+# All Build rule for target.
+CMakeFiles/vepc-cli.dir/all:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/vepc-cli.dir/build.make CMakeFiles/vepc-cli.dir/depend
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/vepc-cli.dir/build.make CMakeFiles/vepc-cli.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/mnt/c/Users/Alexey/Desktop/min/vne/vepc/build/CMakeFiles --progress-num=3,4 "Built target vepc-cli"
+.PHONY : CMakeFiles/vepc-cli.dir/all
+
+# Build rule for subdir invocation for target.
+CMakeFiles/vepc-cli.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/Alexey/Desktop/min/vne/vepc/build/CMakeFiles 2
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/vepc-cli.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/Alexey/Desktop/min/vne/vepc/build/CMakeFiles 0
+.PHONY : CMakeFiles/vepc-cli.dir/rule
+
+# Convenience name for target.
+vepc-cli: CMakeFiles/vepc-cli.dir/rule
+.PHONY : vepc-cli
+
+# clean rule for target.
+CMakeFiles/vepc-cli.dir/clean:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/vepc-cli.dir/build.make CMakeFiles/vepc-cli.dir/clean
+.PHONY : CMakeFiles/vepc-cli.dir/clean
 
 #=============================================================================
 # Special targets to cleanup operation of make.

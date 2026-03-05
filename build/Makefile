@@ -57,10 +57,10 @@ RM = /usr/bin/cmake -E rm -f
 EQUALS = =
 
 # The top-level source directory on which CMake was run.
-CMAKE_SOURCE_DIR = /mnt/c/Users/Alexey/Desktop/min/vNE/vEPC
+CMAKE_SOURCE_DIR = /mnt/c/Users/Alexey/Desktop/min/vne/vepc
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = /mnt/c/Users/Alexey/Desktop/min/vNE/vEPC/build
+CMAKE_BINARY_DIR = /mnt/c/Users/Alexey/Desktop/min/vne/vepc/build
 
 #=============================================================================
 # Targets provided globally by CMake.
@@ -87,9 +87,9 @@ rebuild_cache/fast: rebuild_cache
 
 # The main all target
 all: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/Alexey/Desktop/min/vNE/vEPC/build/CMakeFiles /mnt/c/Users/Alexey/Desktop/min/vNE/vEPC/build//CMakeFiles/progress.marks
+	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/Alexey/Desktop/min/vne/vepc/build/CMakeFiles /mnt/c/Users/Alexey/Desktop/min/vne/vepc/build//CMakeFiles/progress.marks
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 all
-	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/Alexey/Desktop/min/vNE/vEPC/build/CMakeFiles 0
+	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/c/Users/Alexey/Desktop/min/vne/vepc/build/CMakeFiles 0
 .PHONY : all
 
 # The main clean target
@@ -129,6 +129,43 @@ vepc/fast:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/vepc.dir/build.make CMakeFiles/vepc.dir/build
 .PHONY : vepc/fast
 
+#=============================================================================
+# Target rules for targets named vepc-cli
+
+# Build rule for target.
+vepc-cli: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 vepc-cli
+.PHONY : vepc-cli
+
+# fast build rule for target.
+vepc-cli/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/vepc-cli.dir/build.make CMakeFiles/vepc-cli.dir/build
+.PHONY : vepc-cli/fast
+
+cli/vepc-cli.o: cli/vepc-cli.cpp.o
+.PHONY : cli/vepc-cli.o
+
+# target to build an object file
+cli/vepc-cli.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/vepc-cli.dir/build.make CMakeFiles/vepc-cli.dir/cli/vepc-cli.cpp.o
+.PHONY : cli/vepc-cli.cpp.o
+
+cli/vepc-cli.i: cli/vepc-cli.cpp.i
+.PHONY : cli/vepc-cli.i
+
+# target to preprocess a source file
+cli/vepc-cli.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/vepc-cli.dir/build.make CMakeFiles/vepc-cli.dir/cli/vepc-cli.cpp.i
+.PHONY : cli/vepc-cli.cpp.i
+
+cli/vepc-cli.s: cli/vepc-cli.cpp.s
+.PHONY : cli/vepc-cli.s
+
+# target to generate assembly for a file
+cli/vepc-cli.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/vepc-cli.dir/build.make CMakeFiles/vepc-cli.dir/cli/vepc-cli.cpp.s
+.PHONY : cli/vepc-cli.cpp.s
+
 main.o: main.cpp.o
 .PHONY : main.o
 
@@ -162,6 +199,10 @@ help:
 	@echo "... edit_cache"
 	@echo "... rebuild_cache"
 	@echo "... vepc"
+	@echo "... vepc-cli"
+	@echo "... cli/vepc-cli.o"
+	@echo "... cli/vepc-cli.i"
+	@echo "... cli/vepc-cli.s"
 	@echo "... main.o"
 	@echo "... main.i"
 	@echo "... main.s"
