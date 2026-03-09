@@ -2,6 +2,9 @@ cmake_minimum_required(VERSION 3.10)
 project(vEPC)
 set(CMAKE_CXX_STANDARD 17)
 
+# Корень проекта в include path (для tests/ → #include "src/...")
+include_directories(${CMAKE_SOURCE_DIR})
+
 enable_testing()
 
 # Главная программа vEPC
@@ -19,31 +22,31 @@ add_executable(vepc-cli
 )
 
 add_executable(test-gtp-parser
-    test_gtp_parser.cpp
+    tests/test_gtp_parser.cpp
     src/gtp_parser.cpp
 )
 
 add_executable(test-s1ap-parser
-    test_s1ap_parser.cpp
+    tests/test_s1ap_parser.cpp
     src/s1ap_parser.cpp
 )
 
 add_executable(test-runtime-cli
-    test_runtime_cli.cpp
+    tests/test_runtime_cli.cpp
 )
 
 add_executable(test-s11-gtpc-client
-    test_s11_gtpc_client.cpp
+    tests/test_s11_gtpc_client.cpp
     src/gtp_parser.cpp
 )
 
 add_executable(test-diameter-parser
-    test_diameter_parser.cpp
+    tests/test_diameter_parser.cpp
     src/diameter_parser.cpp
 )
 
 add_executable(test-s6a-diameter-client
-    test_s6a_diameter_client.cpp
+    tests/test_s6a_diameter_client.cpp
     src/diameter_parser.cpp
 )
 

@@ -1,6 +1,9 @@
 # Local editor settings
 .vscode/
 
+# Python virtualenvs
+.venv*
+
 # CMake and build outputs
 /build/
 /build-win/
