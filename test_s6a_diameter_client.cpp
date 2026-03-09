@@ -260,6 +260,98 @@ bool trySendMode(const std::string& mode, std::string& error) {
         }
     }
 
+    if (mode == "auth") {
+        const std::vector<uint8_t> air = vepc::buildAuthInfoRequest(
+            "mme.vepc.local", "epc.mnc001.mcc001.3gppnetwork.org", "001010123456789");
+        if (!sendAll(socketHandle, air, error)) {
+            closeSocket(socketHandle);
+#ifdef _WIN32
+            WSACleanup();
+#endif
+            return false;
+        }
+
+        std::vector<uint8_t> aiaResponse;
+        if (!recvAll(socketHandle, aiaResponse, error)) {
+            closeSocket(socketHandle);
+#ifdef _WIN32
+            WSACleanup();
+#endif
+            return false;
+        }
+
+        vepc::DiameterHeader aiaHeader;
+        if (!vepc::parseDiameterHeader(aiaResponse, aiaHeader, error)) {
+            closeSocket(socketHandle);
+#ifdef _WIN32
+            WSACleanup();
+#endif
+            return false;
+        }
+        if (aiaHeader.commandCode != 318 || aiaHeader.request) {
+            error = "unexpected AIA response header";
+            closeSocket(socketHandle);
+#ifdef _WIN32
+            WSACleanup();
+#endif
+            return false;
+        }
+        if (aiaHeader.applicationId != vepc::kS6aApplicationId) {
+            error = "unexpected AIA application-id";
+            closeSocket(socketHandle);
+#ifdef _WIN32
+            WSACleanup();
+#endif
+            return false;
+        }
+    }
+
+    if (mode == "location") {
+        const std::vector<uint8_t> ulr = vepc::buildUpdateLocationRequest(
+            "mme.vepc.local", "epc.mnc001.mcc001.3gppnetwork.org", "001010123456789");
+        if (!sendAll(socketHandle, ulr, error)) {
+            closeSocket(socketHandle);
+#ifdef _WIN32
+            WSACleanup();
+#endif
+            return false;
+        }
+
+        std::vector<uint8_t> ulaResponse;
+        if (!recvAll(socketHandle, ulaResponse, error)) {
+            closeSocket(socketHandle);
+#ifdef _WIN32
+            WSACleanup();
+#endif
+            return false;
+        }
+
+        vepc::DiameterHeader ulaHeader;
+        if (!vepc::parseDiameterHeader(ulaResponse, ulaHeader, error)) {
+            closeSocket(socketHandle);
+#ifdef _WIN32
+            WSACleanup();
+#endif
+            return false;
+        }
+        if (ulaHeader.commandCode != 316 || ulaHeader.request) {
+            error = "unexpected ULA response header";
+            closeSocket(socketHandle);
+#ifdef _WIN32
+            WSACleanup();
+#endif
+            return false;
+        }
+        if (ulaHeader.applicationId != vepc::kS6aApplicationId) {
+            error = "unexpected ULA application-id";
+            closeSocket(socketHandle);
+#ifdef _WIN32
+            WSACleanup();
+#endif
+            return false;
+        }
+    }
+
     closeSocket(socketHandle);
 #ifdef _WIN32
     WSACleanup();

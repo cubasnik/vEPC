@@ -158,6 +158,12 @@ std::string formatDiameterCommand(uint32_t commandCode, bool request) {
     if (commandCode == 282) {
         return request ? "Disconnect-Peer-Request (DPR)" : "Disconnect-Peer-Answer (DPA)";
     }
+    if (commandCode == 316) {
+        return request ? "Update-Location-Request (ULR)" : "Update-Location-Answer (ULA)";
+    }
+    if (commandCode == 318) {
+        return request ? "Authentication-Information-Request (AIR)" : "Authentication-Information-Answer (AIA)";
+    }
 
     std::ostringstream oss;
     oss << (request ? "Request " : "Answer ")
@@ -408,6 +414,225 @@ std::vector<uint8_t> buildDisconnectPeerAnswer(const DiameterHeader& requestHead
 
     appendUint32Avp(response, 268, resultCode);
     appendStringAvp(response, 264, originHost);
+
+    const uint32_t totalLength = static_cast<uint32_t>(response.size());
+    response[1] = static_cast<uint8_t>((totalLength >> 16) & 0xFF);
+    response[2] = static_cast<uint8_t>((totalLength >> 8) & 0xFF);
+    response[3] = static_cast<uint8_t>(totalLength & 0xFF);
+
+    return response;
+}
+
+bool parseAuthInfoRequest(const std::vector<uint8_t>& packet,
+                          DiameterAuthInfoRequest& request,
+                          std::string& error) {
+    request = {};
+    if (!parseDiameterHeader(packet, request.header, error)) {
+        return false;
+    }
+    if (request.header.commandCode != 318 || !request.header.request) {
+        error = "packet is not a Diameter AIR";
+        return false;
+    }
+
+    std::size_t offset = request.header.headerLength;
+    while (offset < request.header.messageLength) {
+        if (offset + 8 > request.header.messageLength) {
+            error = "truncated Diameter AVP header";
+            return false;
+        }
+
+        const uint32_t avpCode = readUint32Be(&packet[offset]);
+        const uint8_t avpFlags = packet[offset + 4];
+        const uint32_t avpLength = readUint24Be(&packet[offset + 5]);
+        const std::size_t avpHeaderLength = (avpFlags & 0x80) != 0 ? 12u : 8u;
+        if (avpLength < avpHeaderLength) {
+            error = "invalid Diameter AVP length";
+            return false;
+        }
+        if (offset + avpLength > request.header.messageLength) {
+            error = "Diameter AVP exceeds declared message length";
+            return false;
+        }
+
+        const std::size_t payloadOffset = offset + avpHeaderLength;
+        const std::size_t payloadLength = avpLength - avpHeaderLength;
+        if (avpCode == 264) {
+            request.originHost.assign(reinterpret_cast<const char*>(packet.data() + payloadOffset), payloadLength);
+            request.hasOriginHost = true;
+        } else if (avpCode == 296) {
+            request.originRealm.assign(reinterpret_cast<const char*>(packet.data() + payloadOffset), payloadLength);
+            request.hasOriginRealm = true;
+        } else if (avpCode == 1) {
+            request.userName.assign(reinterpret_cast<const char*>(packet.data() + payloadOffset), payloadLength);
+            request.hasUserName = true;
+        }
+
+        offset += paddedAvpLength(avpLength);
+    }
+
+    return true;
+}
+
+std::vector<uint8_t> buildAuthInfoRequest(const std::string& originHost,
+                                          const std::string& originRealm,
+                                          const std::string& userName,
+                                          uint32_t hopByHopId,
+                                          uint32_t endToEndId) {
+    std::vector<uint8_t> request;
+    request.reserve(128);
+
+    request.push_back(0x01);
+    appendUint24Be(request, 0);
+    request.push_back(0xC0);
+    appendUint24Be(request, 318);
+    appendUint32Be(request, kS6aApplicationId);
+    appendUint32Be(request, hopByHopId);
+    appendUint32Be(request, endToEndId);
+
+    appendStringAvp(request, 264, originHost);
+    appendStringAvp(request, 296, originRealm);
+    appendStringAvp(request, 1, userName, 0x40);
+    appendUint32Avp(request, 277, 1, 0x40);
+
+    const uint32_t totalLength = static_cast<uint32_t>(request.size());
+    request[1] = static_cast<uint8_t>((totalLength >> 16) & 0xFF);
+    request[2] = static_cast<uint8_t>((totalLength >> 8) & 0xFF);
+    request[3] = static_cast<uint8_t>(totalLength & 0xFF);
+
+    return request;
+}
+
+std::vector<uint8_t> buildAuthInfoAnswer(const DiameterHeader& requestHeader,
+                                         const std::string& originHost,
+                                         const std::string& originRealm,
+                                         uint32_t resultCode) {
+    std::vector<uint8_t> response;
+    response.reserve(128);
+
+    response.push_back(0x01);
+    appendUint24Be(response, 0);
+
+    uint8_t flags = static_cast<uint8_t>(requestHeader.flags & 0x40);
+    response.push_back(flags);
+    appendUint24Be(response, 318);
+    appendUint32Be(response, kS6aApplicationId);
+    appendUint32Be(response, requestHeader.hopByHopId);
+    appendUint32Be(response, requestHeader.endToEndId);
+
+    appendUint32Avp(response, 268, resultCode);
+    appendStringAvp(response, 264, originHost);
+    appendStringAvp(response, 296, originRealm);
+    appendUint32Avp(response, 277, 1, 0x40);
+
+    const uint32_t totalLength = static_cast<uint32_t>(response.size());
+    response[1] = static_cast<uint8_t>((totalLength >> 16) & 0xFF);
+    response[2] = static_cast<uint8_t>((totalLength >> 8) & 0xFF);
+    response[3] = static_cast<uint8_t>(totalLength & 0xFF);
+
+    return response;
+}
+
+bool parseUpdateLocationRequest(const std::vector<uint8_t>& packet,
+                                DiameterUpdateLocationRequest& request,
+                                std::string& error) {
+    request = {};
+    if (!parseDiameterHeader(packet, request.header, error)) {
+        return false;
+    }
+    if (request.header.commandCode != 316 || !request.header.request) {
+        error = "packet is not a Diameter ULR";
+        return false;
+    }
+
+    std::size_t offset = request.header.headerLength;
+    while (offset < request.header.messageLength) {
+        if (offset + 8 > request.header.messageLength) {
+            error = "truncated Diameter AVP header";
+            return false;
+        }
+
+        const uint32_t avpCode = readUint32Be(&packet[offset]);
+        const uint8_t avpFlags = packet[offset + 4];
+        const uint32_t avpLength = readUint24Be(&packet[offset + 5]);
+        const std::size_t avpHeaderLength = (avpFlags & 0x80) != 0 ? 12u : 8u;
+        if (avpLength < avpHeaderLength) {
+            error = "invalid Diameter AVP length";
+            return false;
+        }
+        if (offset + avpLength > request.header.messageLength) {
+            error = "Diameter AVP exceeds declared message length";
+            return false;
+        }
+
+        const std::size_t payloadOffset = offset + avpHeaderLength;
+        const std::size_t payloadLength = avpLength - avpHeaderLength;
+        if (avpCode == 264) {
+            request.originHost.assign(reinterpret_cast<const char*>(packet.data() + payloadOffset), payloadLength);
+            request.hasOriginHost = true;
+        } else if (avpCode == 296) {
+            request.originRealm.assign(reinterpret_cast<const char*>(packet.data() + payloadOffset), payloadLength);
+            request.hasOriginRealm = true;
+        } else if (avpCode == 1) {
+            request.userName.assign(reinterpret_cast<const char*>(packet.data() + payloadOffset), payloadLength);
+            request.hasUserName = true;
+        }
+
+        offset += paddedAvpLength(avpLength);
+    }
+
+    return true;
+}
+
+std::vector<uint8_t> buildUpdateLocationRequest(const std::string& originHost,
+                                                const std::string& originRealm,
+                                                const std::string& userName,
+                                                uint32_t hopByHopId,
+                                                uint32_t endToEndId) {
+    std::vector<uint8_t> request;
+    request.reserve(128);
+
+    request.push_back(0x01);
+    appendUint24Be(request, 0);
+    request.push_back(0xC0);
+    appendUint24Be(request, 316);
+    appendUint32Be(request, kS6aApplicationId);
+    appendUint32Be(request, hopByHopId);
+    appendUint32Be(request, endToEndId);
+
+    appendStringAvp(request, 264, originHost);
+    appendStringAvp(request, 296, originRealm);
+    appendStringAvp(request, 1, userName, 0x40);
+    appendUint32Avp(request, 277, 1, 0x40);
+
+    const uint32_t totalLength = static_cast<uint32_t>(request.size());
+    request[1] = static_cast<uint8_t>((totalLength >> 16) & 0xFF);
+    request[2] = static_cast<uint8_t>((totalLength >> 8) & 0xFF);
+    request[3] = static_cast<uint8_t>(totalLength & 0xFF);
+
+    return request;
+}
+
+std::vector<uint8_t> buildUpdateLocationAnswer(const DiameterHeader& requestHeader,
+                                               const std::string& originHost,
+                                               const std::string& originRealm,
+                                               uint32_t resultCode) {
+    std::vector<uint8_t> response;
+    response.reserve(128);
+
+    response.push_back(0x01);
+    appendUint24Be(response, 0);
+
+    uint8_t flags = static_cast<uint8_t>(requestHeader.flags & 0x40);
+    response.push_back(flags);
+    appendUint24Be(response, 316);
+    appendUint32Be(response, kS6aApplicationId);
+    appendUint32Be(response, requestHeader.hopByHopId);
+    appendUint32Be(response, requestHeader.endToEndId);
+
+    appendUint32Avp(response, 268, resultCode);
+    appendStringAvp(response, 264, originHost);
+    appendStringAvp(response, 296, originRealm);
 
     const uint32_t totalLength = static_cast<uint32_t>(response.size());
     response[1] = static_cast<uint8_t>((totalLength >> 16) & 0xFF);

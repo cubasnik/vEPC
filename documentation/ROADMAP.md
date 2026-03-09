@@ -655,6 +655,22 @@
    - Ожидаемый результат:
       - `S6a` полностью закрывает базовый Diameter RFC 6733 peer lifecycle: CER/CEA (установка), DWR/DWA (поддержание), DPR/DPA (корректное закрытие), что является полной основой для перехода к прикладным сообщениям (AIR/AIA, ULR/ULA)
 
+16. Шаг 5.16: сделано
+   - Файлы: `main.cpp`, `src/diameter_parser.h`, `src/diameter_parser.cpp`, `test_diameter_parser.cpp`, `test_s6a_diameter_client.cpp`, `cmake/TestS6aAuth.cmake`, `cmake/TestS6aLocation.cmake`, `CMakeLists.txt`
+   - Изменения:
+      - добавить первые прикладные S6a сообщения: `Authentication-Information-Request/Answer` (`AIR/AIA`, command 318) и `Update-Location-Request/Answer` (`ULR/ULA`, command 316) — обязательные процедуры 3GPP TS 29.272 для взаимодействия MME↔HSS
+      - парсер: `DiameterAuthInfoRequest` и `DiameterUpdateLocationRequest` с `Origin-Host`, `Origin-Realm` и `User-Name` (IMSI); `parseAuthInfoRequest()`, `buildAuthInfoRequest()`, `buildAuthInfoAnswer()` для command 318 с `Auth-Session-State` AVP (277); `parseUpdateLocationRequest()`, `buildUpdateLocationRequest()`, `buildUpdateLocationAnswer()` для command 316; все прикладные сообщения используют флаги `0xC0` (Request + Proxiable), `app_id = 16777251` (S6a Application-Id); `formatDiameterCommand()` распознаёт commands 318 и 316
+      - runtime: `S6a` TCP handler обрабатывает AIR — парсит AVP, извлекает IMSI и Origin-Host в telemetry detail, отправляет AIA; аналогично для ULR → ULA
+      - тест-клиент: режим `auth` — выполняет CER→CEA→AIR→AIA; режим `location` — выполняет CER→CEA→ULR→ULA; оба валидируют command code, answer flag и S6a application-id
+      - smoke `s6a-auth-smoke` доказывает AIR roundtrip, проверяет `Last Message: AIR`, `Last Detail: imsi=...` и логи AIR/AIA
+      - smoke `s6a-location-smoke` доказывает ULR roundtrip, проверяет `Last Message: ULR`, `Last Detail: imsi=...` и логи ULR/ULA
+   - Проверка:
+      - `cmake --build build-win --config Release`
+      - `ctest --test-dir build-win -C Release -R "diameter-parser-smoke|s6a-(telemetry|watchdog|disconnect|auth|location)-smoke" --output-on-failure`
+      - `ctest --test-dir build-win -C Release --output-on-failure`
+   - Ожидаемый результат:
+      - `S6a` получает первые прикладные Diameter процедуры поверх завершённого базового peer lifecycle, в которых MME отправляет запросы аутентификации и обновления локации к HSS, а runtime telemetry отражает IMSI и Origin-Host из каждого сообщения
+
 ## Ближайший план (рекомендуемый порядок)
 
 1. Закрыть `Этап 0.6`: help по режимам, структурированные обёртки для всех runtime-команд, стабильные smoke tests.

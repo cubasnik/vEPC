@@ -44,6 +44,28 @@ struct DiameterDisconnectPeerRequest {
     bool hasDisconnectCause = false;
 };
 
+struct DiameterAuthInfoRequest {
+    DiameterHeader header;
+    std::string originHost;
+    std::string originRealm;
+    std::string userName;
+    bool hasOriginHost = false;
+    bool hasOriginRealm = false;
+    bool hasUserName = false;
+};
+
+struct DiameterUpdateLocationRequest {
+    DiameterHeader header;
+    std::string originHost;
+    std::string originRealm;
+    std::string userName;
+    bool hasOriginHost = false;
+    bool hasOriginRealm = false;
+    bool hasUserName = false;
+};
+
+constexpr uint32_t kS6aApplicationId = 16777251;
+
 bool parseDiameterHeader(const std::vector<uint8_t>& packet, DiameterHeader& header, std::string& error);
 bool parseCapabilitiesExchangeRequest(const std::vector<uint8_t>& packet,
                                       DiameterCapabilitiesExchangeRequest& request,
@@ -67,6 +89,30 @@ std::vector<uint8_t> buildDisconnectPeerRequest(const std::string& originHost,
                                                 uint32_t endToEndId = 0x33334444);
 std::vector<uint8_t> buildDisconnectPeerAnswer(const DiameterHeader& requestHeader,
                                                const std::string& originHost,
+                                               uint32_t resultCode = 2001);
+bool parseAuthInfoRequest(const std::vector<uint8_t>& packet,
+                          DiameterAuthInfoRequest& request,
+                          std::string& error);
+std::vector<uint8_t> buildAuthInfoRequest(const std::string& originHost,
+                                          const std::string& originRealm,
+                                          const std::string& userName,
+                                          uint32_t hopByHopId = 0x44445555,
+                                          uint32_t endToEndId = 0x66667777);
+std::vector<uint8_t> buildAuthInfoAnswer(const DiameterHeader& requestHeader,
+                                         const std::string& originHost,
+                                         const std::string& originRealm,
+                                         uint32_t resultCode = 2001);
+bool parseUpdateLocationRequest(const std::vector<uint8_t>& packet,
+                                DiameterUpdateLocationRequest& request,
+                                std::string& error);
+std::vector<uint8_t> buildUpdateLocationRequest(const std::string& originHost,
+                                                const std::string& originRealm,
+                                                const std::string& userName,
+                                                uint32_t hopByHopId = 0x55556666,
+                                                uint32_t endToEndId = 0x77778888);
+std::vector<uint8_t> buildUpdateLocationAnswer(const DiameterHeader& requestHeader,
+                                               const std::string& originHost,
+                                               const std::string& originRealm,
                                                uint32_t resultCode = 2001);
 std::vector<uint8_t> buildCapabilitiesExchangeRequest(const std::string& originHost,
                                                       const std::string& originRealm,
