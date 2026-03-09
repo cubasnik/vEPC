@@ -312,9 +312,63 @@
    - Ожидаемый результат:
       - demo UE flow получает минимальный idle mobility transition между service release и detach
 
+10. Шаг 2.10: сделано
+   - Файлы: `main.cpp`, `src/s1ap_parser.h`, `src/s1ap_parser.cpp`, `test_s1ap_parser.cpp`
+   - Изменения:
+      - добавить demo parser для `Tracking Area Update Complete (0x4A)`
+      - после `Tracking Area Update Accept` принимать `Tracking Area Update Complete` только при pending TAU accept и совпадающем `security_context_id`
+      - переводить UE из pending TAU в устойчивое updated-idle состояние без потери attach/security context и tracking area code
+      - отразить TAU completion progress в `state`
+   - Проверка:
+      - `cmake --build build-win --config Release`
+      - `ctest --test-dir build-win -C Release --output-on-failure`
+      - локальный smoke test `Attach Request -> Authentication Request -> Authentication Response -> Security Mode Command -> Security Mode Complete -> Attach Accept -> Attach Complete -> Service Request -> Service Accept -> Service Release Request -> Service Release Complete -> Tracking Area Update Request -> Tracking Area Update Accept -> Tracking Area Update Complete -> state`
+   - Ожидаемый результат:
+      - demo UE flow получает завершённый idle mobility path, после которого возможны как новый service request, так и detach
+
+11. Шаг 2.11: сделано
+   - Файлы: `main.cpp`, `src/s1ap_parser.h`, `src/s1ap_parser.cpp`, `test_s1ap_parser.cpp`
+   - Изменения:
+      - добавить demo parsers и builder для `Service Resume Request (0x50)` и `Service Resume Accept (0x51)`
+      - после `Tracking Area Update Complete` принимать `Service Resume Request` только для UE в `tau-updated` и отвечать `Service Resume Accept`
+      - переводить UE из updated-idle обратно в `service-active`, сохраняя tracking area code и security context
+      - отразить service resume progress в `state`
+   - Проверка:
+      - `cmake --build build-win --config Release`
+      - `ctest --test-dir build-win -C Release --output-on-failure`
+      - локальный smoke test `Attach Request -> Authentication Request -> Authentication Response -> Security Mode Command -> Security Mode Complete -> Attach Accept -> Attach Complete -> Service Request -> Service Accept -> Service Release Request -> Service Release Complete -> Tracking Area Update Request -> Tracking Area Update Accept -> Tracking Area Update Complete -> Service Resume Request -> Service Resume Accept -> state`
+   - Ожидаемый результат:
+      - demo UE flow получает явный возврат из updated-idle в service-active после mobility update
+
 ### Этап 3 — Сохранение состояния
 
 Приоритет: `P2`
+
+1. Шаг 3.1: сделано
+   - Файлы: `main.cpp`
+   - Изменения:
+      - добавить минимальную JSON-сериализацию PDP/UE runtime contexts в `build/state/runtime_state.json`
+      - вызывать сохранение при `stop()` и `restart()` как подготовительный шаг перед полной загрузкой состояния
+      - зафиксировать в файле служебные поля `schema_version` и `saved_at`, чтобы следующий шаг загрузки опирался на стабильный формат
+   - Проверка:
+      - `cmake --build build-win --config Release --target vepc`
+      - `ctest --test-dir build-win -C Release --output-on-failure`
+      - локальная проверка `Attach Request -> restart -> build/state/runtime_state.json`
+   - Ожидаемый результат:
+      - controlled `stop`/`restart` сохраняет диагностируемый JSON snapshot текущих PDP/UE contexts даже до реализации загрузки с диска
+
+2. Шаг 3.2: сделано
+   - Файлы: `main.cpp`
+   - Изменения:
+      - очищать in-memory `ueContexts` и `pdpContexts` перед загрузкой runtime-state при `start()`
+      - загружать сохранённый JSON из `build/state/runtime_state.json` при запуске и после `restart()`
+      - восстанавливать минимально достаточные поля UE/PDP context из файла, сохраняя диагностируемость через `state`
+   - Проверка:
+      - `cmake --build build-win --config Release --target vepc`
+      - `ctest --test-dir build-win -C Release --output-on-failure`
+      - локальная проверка `удалить runtime_state.json -> start -> Attach Request -> restart -> state`
+   - Ожидаемый результат:
+      - runtime restart больше не зависит от старых in-memory context и поднимает PDP/UE state из последнего сохранённого JSON snapshot
 
 - Сериализация PDP/UE контекстов в JSON или бинарный файл (при `stop`/`restart`)
 - Загрузка при запуске (опционально)

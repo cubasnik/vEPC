@@ -118,6 +118,25 @@ struct DemoNasTrackingAreaUpdateAccept {
     bool hasTrackingAreaCode = false;
 };
 
+struct DemoNasTrackingAreaUpdateComplete {
+    uint8_t keySetIdentifier = 0;
+    bool hasKeySetIdentifier = false;
+};
+
+struct DemoNasServiceResumeRequest {
+    uint8_t keySetIdentifier = 0;
+    uint8_t resumeType = 0;
+    bool hasKeySetIdentifier = false;
+    bool hasResumeType = false;
+};
+
+struct DemoNasServiceResumeAccept {
+    uint8_t keySetIdentifier = 0;
+    uint8_t bearerId = 0;
+    bool hasKeySetIdentifier = false;
+    bool hasBearerId = false;
+};
+
 std::string formatS1apProcedureCode(uint8_t procedureCode);
 std::string formatNasMessageType(uint8_t messageType);
 bool parseDemoInitialUeMessage(const std::vector<uint8_t>& packet,
@@ -168,6 +187,15 @@ bool parseNasTrackingAreaUpdateRequest(const std::vector<uint8_t>& nasPdu,
 bool parseNasTrackingAreaUpdateAccept(const std::vector<uint8_t>& nasPdu,
                                       DemoNasTrackingAreaUpdateAccept& accept,
                                       std::string& error);
+bool parseNasTrackingAreaUpdateComplete(const std::vector<uint8_t>& nasPdu,
+                                        DemoNasTrackingAreaUpdateComplete& complete,
+                                        std::string& error);
+bool parseNasServiceResumeRequest(const std::vector<uint8_t>& nasPdu,
+                                  DemoNasServiceResumeRequest& request,
+                                  std::string& error);
+bool parseNasServiceResumeAccept(const std::vector<uint8_t>& nasPdu,
+                                 DemoNasServiceResumeAccept& accept,
+                                 std::string& error);
 std::vector<uint8_t> buildNasAuthenticationRequest(uint8_t keySetIdentifier = 0x01);
 std::vector<uint8_t> buildNasSecurityModeCommand(uint8_t keySetIdentifier = 0x01,
                                                  uint8_t selectedAlgorithm = 0x01);
@@ -181,6 +209,8 @@ std::vector<uint8_t> buildNasDetachAccept(uint8_t keySetIdentifier = 0x01,
                                           uint8_t detachResult = 0x00);
 std::vector<uint8_t> buildNasTrackingAreaUpdateAccept(uint8_t keySetIdentifier = 0x01,
                                                       uint8_t trackingAreaCode = 0x11);
+std::vector<uint8_t> buildNasServiceResumeAccept(uint8_t keySetIdentifier = 0x01,
+                                                 uint8_t bearerId = 0x05);
 std::vector<uint8_t> buildDemoDownlinkNasTransport(const std::string& imsi,
                                                    const std::string& guti,
                                                    const std::vector<uint8_t>& nasPdu);

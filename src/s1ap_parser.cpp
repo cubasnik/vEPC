@@ -139,6 +139,12 @@ std::string formatNasMessageType(uint8_t messageType) {
         return "Tracking Area Update Request (0x48)";
     case 0x49:
         return "Tracking Area Update Accept (0x49)";
+    case 0x4A:
+        return "Tracking Area Update Complete (0x4A)";
+    case 0x50:
+        return "Service Resume Request (0x50)";
+    case 0x51:
+        return "Service Resume Accept (0x51)";
     default: {
         std::ostringstream oss;
         oss << "0x" << std::uppercase << std::hex << std::setw(2) << std::setfill('0')
@@ -460,6 +466,70 @@ bool parseNasTrackingAreaUpdateAccept(const std::vector<uint8_t>& nasPdu,
     return true;
 }
 
+bool parseNasTrackingAreaUpdateComplete(const std::vector<uint8_t>& nasPdu,
+                                        DemoNasTrackingAreaUpdateComplete& complete,
+                                        std::string& error) {
+    complete = {};
+    error.clear();
+
+    if (nasPdu.size() < 2) {
+        error = "demo Tracking Area Update Complete is too short";
+        return false;
+    }
+    if (nasPdu[0] != 0x4A) {
+        error = "unexpected NAS message type for Tracking Area Update Complete: " + formatNasMessageType(nasPdu[0]);
+        return false;
+    }
+
+    complete.keySetIdentifier = nasPdu[1];
+    complete.hasKeySetIdentifier = true;
+    return true;
+}
+
+bool parseNasServiceResumeRequest(const std::vector<uint8_t>& nasPdu,
+                                  DemoNasServiceResumeRequest& request,
+                                  std::string& error) {
+    request = {};
+    error.clear();
+
+    if (nasPdu.size() < 3) {
+        error = "demo Service Resume Request is too short";
+        return false;
+    }
+    if (nasPdu[0] != 0x50) {
+        error = "unexpected NAS message type for Service Resume Request: " + formatNasMessageType(nasPdu[0]);
+        return false;
+    }
+
+    request.keySetIdentifier = nasPdu[1];
+    request.resumeType = nasPdu[2];
+    request.hasKeySetIdentifier = true;
+    request.hasResumeType = true;
+    return true;
+}
+
+bool parseNasServiceResumeAccept(const std::vector<uint8_t>& nasPdu,
+                                 DemoNasServiceResumeAccept& accept,
+                                 std::string& error) {
+    accept = {};
+    error.clear();
+
+    if (nasPdu.size() < 3) {
+        error = "demo Service Resume Accept is too short";
+        return false;
+    }
+    if (nasPdu[0] != 0x51) {
+        error = "unexpected NAS message type for Service Resume Accept: " + formatNasMessageType(nasPdu[0]);
+        return false;
+    }
+
+    accept.keySetIdentifier = nasPdu[1];
+    accept.bearerId = nasPdu[2];
+    accept.hasKeySetIdentifier = true;
+    accept.hasBearerId = true;
+    return true;
+}
+
 std::vector<uint8_t> buildNasAuthenticationRequest(uint8_t keySetIdentifier) {
     return {
         0x52,
@@ -518,6 +588,15 @@ std::vector<uint8_t> buildNasTrackingAreaUpdateAccept(uint8_t keySetIdentifier,
         0x49,
         keySetIdentifier,
         trackingAreaCode,
+    };
+}
+
+std::vector<uint8_t> buildNasServiceResumeAccept(uint8_t keySetIdentifier,
+                                                 uint8_t bearerId) {
+    return {
+        0x51,
+        keySetIdentifier,
+        bearerId,
     };
 }
 

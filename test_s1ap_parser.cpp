@@ -37,6 +37,9 @@ int main() {
     vepc::DemoNasDetachAccept detachAcceptResult;
     vepc::DemoNasTrackingAreaUpdateRequest trackingAreaUpdateRequest;
     vepc::DemoNasTrackingAreaUpdateAccept trackingAreaUpdateAccept;
+    vepc::DemoNasTrackingAreaUpdateComplete trackingAreaUpdateComplete;
+    vepc::DemoNasServiceResumeRequest serviceResumeRequest;
+    vepc::DemoNasServiceResumeAccept serviceResumeAccept;
 
     const std::vector<uint8_t> initialUeMessage = {
         0x0C,
@@ -65,6 +68,9 @@ int main() {
     ok &= expect(vepc::formatNasMessageType(0x46) == "Detach Accept (0x46)", "detach accept formatter returns stable label");
     ok &= expect(vepc::formatNasMessageType(0x48) == "Tracking Area Update Request (0x48)", "tau request formatter returns stable label");
     ok &= expect(vepc::formatNasMessageType(0x49) == "Tracking Area Update Accept (0x49)", "tau accept formatter returns stable label");
+    ok &= expect(vepc::formatNasMessageType(0x4A) == "Tracking Area Update Complete (0x4A)", "tau complete formatter returns stable label");
+    ok &= expect(vepc::formatNasMessageType(0x50) == "Service Resume Request (0x50)", "service resume request formatter returns stable label");
+    ok &= expect(vepc::formatNasMessageType(0x51) == "Service Resume Accept (0x51)", "service resume accept formatter returns stable label");
 
     const std::vector<uint8_t> expectedAuthRequest = {0x52, 0x01};
     ok &= expect(vepc::buildNasAuthenticationRequest() == expectedAuthRequest,
@@ -204,6 +210,30 @@ int main() {
     ok &= expect(trackingAreaUpdateAccept.hasTrackingAreaCode && trackingAreaUpdateAccept.trackingAreaCode == 0x11,
                  "tau accept parser extracts tracking area code");
 
+    const std::vector<uint8_t> trackingAreaUpdateCompleteBytes = {0x4A, 0x01};
+    ok &= expect(vepc::parseNasTrackingAreaUpdateComplete(trackingAreaUpdateCompleteBytes, trackingAreaUpdateComplete, error),
+                 "tau complete parser accepts stable bytes");
+    ok &= expect(trackingAreaUpdateComplete.hasKeySetIdentifier && trackingAreaUpdateComplete.keySetIdentifier == 0x01,
+                 "tau complete parser extracts key set identifier");
+
+    const std::vector<uint8_t> serviceResumeRequestBytes = {0x50, 0x01, 0x01};
+    ok &= expect(vepc::parseNasServiceResumeRequest(serviceResumeRequestBytes, serviceResumeRequest, error),
+                 "service resume request parser accepts stable bytes");
+    ok &= expect(serviceResumeRequest.hasKeySetIdentifier && serviceResumeRequest.keySetIdentifier == 0x01,
+                 "service resume request parser extracts key set identifier");
+    ok &= expect(serviceResumeRequest.hasResumeType && serviceResumeRequest.resumeType == 0x01,
+                 "service resume request parser extracts resume type");
+
+    const std::vector<uint8_t> expectedServiceResumeAccept = {0x51, 0x01, 0x05};
+    ok &= expect(vepc::buildNasServiceResumeAccept() == expectedServiceResumeAccept,
+                 "service resume accept bytes are stable");
+    ok &= expect(vepc::parseNasServiceResumeAccept(expectedServiceResumeAccept, serviceResumeAccept, error),
+                 "service resume accept parser accepts stable bytes");
+    ok &= expect(serviceResumeAccept.hasKeySetIdentifier && serviceResumeAccept.keySetIdentifier == 0x01,
+                 "service resume accept parser extracts key set identifier");
+    ok &= expect(serviceResumeAccept.hasBearerId && serviceResumeAccept.bearerId == 0x05,
+                 "service resume accept parser extracts bearer id");
+
     const std::vector<uint8_t> invalidProcedure = {
         0x0B,
         0x01, 0x03, '1', '2', '3',
@@ -271,6 +301,18 @@ int main() {
                  "short tau accept is rejected");
     ok &= expect(error.find("too short") != std::string::npos,
                  "short tau accept error is descriptive");
+
+    const std::vector<uint8_t> wrongTrackingAreaUpdateComplete = {0x49, 0x01};
+    ok &= expect(!vepc::parseNasTrackingAreaUpdateComplete(wrongTrackingAreaUpdateComplete, trackingAreaUpdateComplete, error),
+                 "wrong NAS message type is rejected for tau complete parser");
+    ok &= expect(error.find("unexpected NAS message type") != std::string::npos,
+                 "wrong tau complete NAS type error is descriptive");
+
+    const std::vector<uint8_t> shortServiceResumeAccept = {0x51, 0x01};
+    ok &= expect(!vepc::parseNasServiceResumeAccept(shortServiceResumeAccept, serviceResumeAccept, error),
+                 "short service resume accept is rejected");
+    ok &= expect(error.find("too short") != std::string::npos,
+                 "short service resume accept error is descriptive");
 
     return ok ? 0 : 1;
 }

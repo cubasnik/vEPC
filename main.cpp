@@ -40,6 +40,7 @@
 
 // Пути относительно рабочей директории (папки проекта)
 #define LOG_FILE    "build/logs/vepc.log"
+#define RUNTIME_STATE_FILE "build/state/runtime_state.json"
 #define CONFIG_FILE "config/vepc.config"
 #define MME_CONFIG_FILE "config/vmme.conf"
 #define SGSN_CONFIG_FILE "config/vsgsn.conf"
@@ -100,6 +101,8 @@ struct UEContext {
     bool        service_request_received = false;
     bool        service_accept_sent = false;
     bool        service_active = false;
+    bool        service_resume_request_received = false;
+    bool        service_resume_accept_sent = false;
     bool        service_release_request_received = false;
     bool        service_release_complete_sent = false;
     bool        detach_request_received = false;
@@ -107,6 +110,7 @@ struct UEContext {
     bool        detached = false;
     bool        tracking_area_update_request_received = false;
     bool        tracking_area_update_accept_sent = false;
+    bool        tracking_area_update_complete_received = false;
     uint8_t     last_nas_message_type = 0;
     bool        has_last_nas_message_type = false;
     uint8_t     last_s1ap_procedure = 0;
@@ -458,6 +462,322 @@ static std::string formatTimestamp(std::time_t value) {
     return buffer;
 }
 
+static bool parseTimestamp(const std::string& value, std::time_t& result) {
+    result = 0;
+    if (value.empty() || value == "n/a") {
+        return true;
+    }
+
+    std::tm localTime{};
+    std::istringstream iss(value);
+    iss >> std::get_time(&localTime, "%Y-%m-%d %H:%M:%S");
+    if (iss.fail()) {
+        return false;
+    }
+
+    result = std::mktime(&localTime);
+    return result != static_cast<std::time_t>(-1);
+}
+
+static std::string escapeJsonString(const std::string& value) {
+    std::ostringstream oss;
+    for (const unsigned char ch : value) {
+        switch (ch) {
+        case '\\':
+            oss << "\\\\";
+            break;
+        case '"':
+            oss << "\\\"";
+            break;
+        case '\b':
+            oss << "\\b";
+            break;
+        case '\f':
+            oss << "\\f";
+            break;
+        case '\n':
+            oss << "\\n";
+            break;
+        case '\r':
+            oss << "\\r";
+            break;
+        case '\t':
+            oss << "\\t";
+            break;
+        default:
+            if (ch < 0x20) {
+                oss << "\\u"
+                    << std::uppercase << std::hex << std::setw(4) << std::setfill('0')
+                    << static_cast<int>(ch)
+                    << std::nouppercase << std::dec << std::setfill(' ');
+            } else {
+                oss << static_cast<char>(ch);
+            }
+            break;
+        }
+    }
+    return oss.str();
+}
+
+static std::string unescapeJsonString(const std::string& value) {
+    std::ostringstream oss;
+    for (size_t index = 0; index < value.size(); ++index) {
+        const char ch = value[index];
+        if (ch != '\\' || index + 1 >= value.size()) {
+            oss << ch;
+            continue;
+        }
+
+        const char escaped = value[++index];
+        switch (escaped) {
+        case '\\':
+            oss << '\\';
+            break;
+        case '"':
+            oss << '"';
+            break;
+        case 'b':
+            oss << '\b';
+            break;
+        case 'f':
+            oss << '\f';
+            break;
+        case 'n':
+            oss << '\n';
+            break;
+        case 'r':
+            oss << '\r';
+            break;
+        case 't':
+            oss << '\t';
+            break;
+        default:
+            oss << escaped;
+            break;
+        }
+    }
+    return oss.str();
+}
+
+static bool findJsonArrayBounds(const std::string& json,
+                                const std::string& key,
+                                size_t& arrayStart,
+                                size_t& arrayEnd) {
+    const std::string token = "\"" + key + "\"";
+    const size_t keyPos = json.find(token);
+    if (keyPos == std::string::npos) {
+        return false;
+    }
+
+    const size_t bracketPos = json.find('[', keyPos + token.size());
+    if (bracketPos == std::string::npos) {
+        return false;
+    }
+
+    bool inString = false;
+    bool escaping = false;
+    int depth = 0;
+    for (size_t pos = bracketPos; pos < json.size(); ++pos) {
+        const char ch = json[pos];
+        if (inString) {
+            if (escaping) {
+                escaping = false;
+            } else if (ch == '\\') {
+                escaping = true;
+            } else if (ch == '"') {
+                inString = false;
+            }
+            continue;
+        }
+
+        if (ch == '"') {
+            inString = true;
+            continue;
+        }
+        if (ch == '[') {
+            ++depth;
+            continue;
+        }
+        if (ch == ']') {
+            --depth;
+            if (depth == 0) {
+                arrayStart = bracketPos + 1;
+                arrayEnd = pos;
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+static std::vector<std::string> splitTopLevelJsonObjects(const std::string& body) {
+    std::vector<std::string> objects;
+    bool inString = false;
+    bool escaping = false;
+    int depth = 0;
+    size_t objectStart = std::string::npos;
+
+    for (size_t pos = 0; pos < body.size(); ++pos) {
+        const char ch = body[pos];
+        if (inString) {
+            if (escaping) {
+                escaping = false;
+            } else if (ch == '\\') {
+                escaping = true;
+            } else if (ch == '"') {
+                inString = false;
+            }
+            continue;
+        }
+
+        if (ch == '"') {
+            inString = true;
+            continue;
+        }
+        if (ch == '{') {
+            if (depth == 0) {
+                objectStart = pos;
+            }
+            ++depth;
+            continue;
+        }
+        if (ch == '}') {
+            --depth;
+            if (depth == 0 && objectStart != std::string::npos) {
+                objects.push_back(body.substr(objectStart, pos - objectStart + 1));
+                objectStart = std::string::npos;
+            }
+        }
+    }
+
+    return objects;
+}
+
+static bool findJsonFieldValue(const std::string& object,
+                               const std::string& key,
+                               size_t& valueStart,
+                               size_t& valueEnd) {
+    const std::string token = "\"" + key + "\":";
+    const size_t keyPos = object.find(token);
+    if (keyPos == std::string::npos) {
+        return false;
+    }
+
+    valueStart = keyPos + token.size();
+    while (valueStart < object.size() && std::isspace(static_cast<unsigned char>(object[valueStart]))) {
+        ++valueStart;
+    }
+    if (valueStart >= object.size()) {
+        return false;
+    }
+
+    if (object[valueStart] == '"') {
+        ++valueStart;
+        valueEnd = valueStart;
+        bool escaping = false;
+        while (valueEnd < object.size()) {
+            const char ch = object[valueEnd];
+            if (escaping) {
+                escaping = false;
+            } else if (ch == '\\') {
+                escaping = true;
+            } else if (ch == '"') {
+                return true;
+            }
+            ++valueEnd;
+        }
+        return false;
+    }
+
+    valueEnd = valueStart;
+    while (valueEnd < object.size() && object[valueEnd] != ',' && object[valueEnd] != '\n' && object[valueEnd] != '\r' && object[valueEnd] != '}') {
+        ++valueEnd;
+    }
+    return valueEnd > valueStart;
+}
+
+static bool extractJsonStringField(const std::string& object,
+                                   const std::string& key,
+                                   std::string& value) {
+    size_t valueStart = 0;
+    size_t valueEnd = 0;
+    if (!findJsonFieldValue(object, key, valueStart, valueEnd)) {
+        return false;
+    }
+    value = unescapeJsonString(object.substr(valueStart, valueEnd - valueStart));
+    return true;
+}
+
+static bool extractJsonBoolField(const std::string& object,
+                                 const std::string& key,
+                                 bool& value) {
+    size_t valueStart = 0;
+    size_t valueEnd = 0;
+    if (!findJsonFieldValue(object, key, valueStart, valueEnd)) {
+        return false;
+    }
+    const std::string token = trimCopy(object.substr(valueStart, valueEnd - valueStart));
+    if (token == "true") {
+        value = true;
+        return true;
+    }
+    if (token == "false") {
+        value = false;
+        return true;
+    }
+    return false;
+}
+
+static bool extractJsonUintField(const std::string& object,
+                                 const std::string& key,
+                                 uint64_t& value) {
+    size_t valueStart = 0;
+    size_t valueEnd = 0;
+    if (!findJsonFieldValue(object, key, valueStart, valueEnd)) {
+        return false;
+    }
+    const std::string token = trimCopy(object.substr(valueStart, valueEnd - valueStart));
+    if (token.empty()) {
+        return false;
+    }
+    value = std::stoull(token);
+    return true;
+}
+
+static void appendJsonStringField(std::ostringstream& oss,
+                                  const std::string& name,
+                                  const std::string& value,
+                                  bool trailingComma = true) {
+    oss << "      \"" << name << "\": \"" << escapeJsonString(value) << "\"";
+    if (trailingComma) {
+        oss << ",";
+    }
+    oss << "\n";
+}
+
+static void appendJsonBoolField(std::ostringstream& oss,
+                                const std::string& name,
+                                bool value,
+                                bool trailingComma = true) {
+    oss << "      \"" << name << "\": " << (value ? "true" : "false");
+    if (trailingComma) {
+        oss << ",";
+    }
+    oss << "\n";
+}
+
+static void appendJsonIntField(std::ostringstream& oss,
+                               const std::string& name,
+                               uint64_t value,
+                               bool trailingComma = true) {
+    oss << "      \"" << name << "\": " << value;
+    if (trailingComma) {
+        oss << ",";
+    }
+    oss << "\n";
+}
+
 static std::string formatPdpTypeValue(const PDPContext& context) {
     if (!context.has_pdp_type) {
         return "n/a";
@@ -500,8 +820,14 @@ static std::string formatAuthFlowState(const UEContext& context) {
     if (context.detached || context.detach_accept_sent) {
         return "detached";
     }
-    if (context.tracking_area_update_accept_sent) {
+    if (context.service_resume_accept_sent) {
+        return "service-resume-accept-sent";
+    }
+    if (context.tracking_area_update_complete_received) {
         return "tau-updated";
+    }
+    if (context.tracking_area_update_accept_sent) {
+        return "tau-accept-sent";
     }
     if (context.service_active) {
         return "service-active";
@@ -676,6 +1002,9 @@ private:
     void upsertPdpContext(const PDPContext& context);
     void upsertUeContext(const UEContext& context);
     bool tryGetUeContext(const std::string& imsi, UEContext& context) const;
+    void clearRuntimeState();
+    void saveRuntimeStateToFile();
+    void loadRuntimeStateFromFile();
 
     std::atomic<bool> running;
     std::atomic<bool> restartRequested{false};
@@ -1476,6 +1805,8 @@ std::string VNodeController::formatStateSnapshotLocked() const {
             oss << "  Service Request Received: " << (context.service_request_received ? "yes" : "no") << "\n";
             oss << "  Service Accept Sent: " << (context.service_accept_sent ? "yes" : "no") << "\n";
             oss << "  Service Active: " << (context.service_active ? "yes" : "no") << "\n";
+            oss << "  Service Resume Request Received: " << (context.service_resume_request_received ? "yes" : "no") << "\n";
+            oss << "  Service Resume Accept Sent: " << (context.service_resume_accept_sent ? "yes" : "no") << "\n";
             oss << "  Service Release Request Received: " << (context.service_release_request_received ? "yes" : "no") << "\n";
             oss << "  Service Release Complete Sent: " << (context.service_release_complete_sent ? "yes" : "no") << "\n";
             oss << "  Detach Request Received: " << (context.detach_request_received ? "yes" : "no") << "\n";
@@ -1483,6 +1814,7 @@ std::string VNodeController::formatStateSnapshotLocked() const {
             oss << "  Detached: " << (context.detached ? "yes" : "no") << "\n";
             oss << "  TAU Request Received: " << (context.tracking_area_update_request_received ? "yes" : "no") << "\n";
             oss << "  TAU Accept Sent: " << (context.tracking_area_update_accept_sent ? "yes" : "no") << "\n";
+            oss << "  TAU Complete Received: " << (context.tracking_area_update_complete_received ? "yes" : "no") << "\n";
             oss << "  Authenticated: " << (context.authenticated ? "yes" : "no") << "\n";
             oss << "  Updated At: " << formatTimestamp(context.updated_at) << "\n";
         }
@@ -1498,6 +1830,256 @@ void VNodeController::upsertPdpContext(const PDPContext& context) {
 void VNodeController::upsertUeContext(const UEContext& context) {
     std::lock_guard<std::mutex> lock(stateMutex);
     ueContexts[context.imsi] = context;
+}
+
+void VNodeController::clearRuntimeState() {
+    std::lock_guard<std::mutex> lock(stateMutex);
+    pdpContexts.clear();
+    ueContexts.clear();
+}
+
+void VNodeController::saveRuntimeStateToFile() {
+    const std::string outputPath = resolveWritableConfigPath(RUNTIME_STATE_FILE);
+
+    std::ostringstream oss;
+    oss << "{\n";
+    oss << "  \"schema_version\": 1,\n";
+    oss << "  \"saved_at\": \"" << escapeJsonString(formatTimestamp(std::time(nullptr))) << "\",\n";
+    oss << "  \"pdp_contexts\": [\n";
+
+    {
+        std::lock_guard<std::mutex> lock(stateMutex);
+
+        bool firstPdp = true;
+        for (const auto& entry : pdpContexts) {
+            const PDPContext& context = entry.second;
+            if (!firstPdp) {
+                oss << ",\n";
+            }
+            firstPdp = false;
+
+            oss << "    {\n";
+            appendJsonIntField(oss, "teid", context.teid);
+            appendJsonIntField(oss, "sequence", context.sequence);
+            appendJsonIntField(oss, "pdp_type", context.pdp_type);
+            appendJsonBoolField(oss, "has_pdp_type", context.has_pdp_type);
+            appendJsonIntField(oss, "last_message_type", context.last_message_type);
+            appendJsonStringField(oss, "peer_ip", context.peer_ip);
+            appendJsonStringField(oss, "ggsn_ip", context.ggsn_ip);
+            appendJsonStringField(oss, "imsi", context.imsi);
+            appendJsonStringField(oss, "apn", context.apn);
+            appendJsonStringField(oss, "updated_at", formatTimestamp(context.updated_at), false);
+            oss << "    }";
+        }
+
+        oss << "\n  ],\n";
+        oss << "  \"ue_contexts\": [\n";
+
+        bool firstUe = true;
+        for (const auto& entry : ueContexts) {
+            const UEContext& context = entry.second;
+            if (!firstUe) {
+                oss << ",\n";
+            }
+            firstUe = false;
+
+            oss << "    {\n";
+            appendJsonStringField(oss, "imsi", context.imsi);
+            appendJsonStringField(oss, "guti", context.guti);
+            appendJsonStringField(oss, "peer_id", context.peer_id);
+            appendJsonBoolField(oss, "authenticated", context.authenticated);
+            appendJsonBoolField(oss, "auth_request_sent", context.auth_request_sent);
+            appendJsonBoolField(oss, "auth_response_received", context.auth_response_received);
+            appendJsonBoolField(oss, "security_mode_command_sent", context.security_mode_command_sent);
+            appendJsonBoolField(oss, "security_mode_complete", context.security_mode_complete);
+            appendJsonBoolField(oss, "attach_accept_sent", context.attach_accept_sent);
+            appendJsonBoolField(oss, "attach_complete_received", context.attach_complete_received);
+            appendJsonBoolField(oss, "attached", context.attached);
+            appendJsonBoolField(oss, "service_request_received", context.service_request_received);
+            appendJsonBoolField(oss, "service_accept_sent", context.service_accept_sent);
+            appendJsonBoolField(oss, "service_active", context.service_active);
+            appendJsonBoolField(oss, "service_resume_request_received", context.service_resume_request_received);
+            appendJsonBoolField(oss, "service_resume_accept_sent", context.service_resume_accept_sent);
+            appendJsonBoolField(oss, "service_release_request_received", context.service_release_request_received);
+            appendJsonBoolField(oss, "service_release_complete_sent", context.service_release_complete_sent);
+            appendJsonBoolField(oss, "detach_request_received", context.detach_request_received);
+            appendJsonBoolField(oss, "detach_accept_sent", context.detach_accept_sent);
+            appendJsonBoolField(oss, "detached", context.detached);
+            appendJsonBoolField(oss, "tracking_area_update_request_received", context.tracking_area_update_request_received);
+            appendJsonBoolField(oss, "tracking_area_update_accept_sent", context.tracking_area_update_accept_sent);
+            appendJsonBoolField(oss, "tracking_area_update_complete_received", context.tracking_area_update_complete_received);
+            appendJsonIntField(oss, "last_nas_message_type", context.last_nas_message_type);
+            appendJsonBoolField(oss, "has_last_nas_message_type", context.has_last_nas_message_type);
+            appendJsonIntField(oss, "last_s1ap_procedure", context.last_s1ap_procedure);
+            appendJsonIntField(oss, "security_context_id", context.security_context_id);
+            appendJsonBoolField(oss, "has_security_context_id", context.has_security_context_id);
+            appendJsonIntField(oss, "selected_nas_algorithm", context.selected_nas_algorithm);
+            appendJsonBoolField(oss, "has_selected_nas_algorithm", context.has_selected_nas_algorithm);
+            appendJsonIntField(oss, "default_bearer_id", context.default_bearer_id);
+            appendJsonBoolField(oss, "has_default_bearer_id", context.has_default_bearer_id);
+            appendJsonIntField(oss, "tracking_area_code", context.tracking_area_code);
+            appendJsonBoolField(oss, "has_tracking_area_code", context.has_tracking_area_code);
+            appendJsonStringField(oss, "auth_flow", formatAuthFlowState(context));
+            appendJsonStringField(oss, "updated_at", formatTimestamp(context.updated_at), false);
+            oss << "    }";
+        }
+    }
+
+    oss << "\n  ]\n";
+    oss << "}\n";
+
+    std::filesystem::path outputFile(outputPath);
+    if (outputFile.has_parent_path()) {
+        std::filesystem::create_directories(outputFile.parent_path());
+    }
+
+    std::ofstream stateFile(outputPath, std::ios::trunc);
+    if (!stateFile) {
+        throw std::runtime_error("Failed to open runtime state file: " + outputPath);
+    }
+
+    stateFile << oss.str();
+    if (!stateFile.good()) {
+        throw std::runtime_error("Failed to write runtime state file: " + outputPath);
+    }
+
+    log("MAIN", "Runtime state saved to " + outputPath);
+}
+
+void VNodeController::loadRuntimeStateFromFile() {
+    clearRuntimeState();
+
+    const std::string inputPath = resolveWritableConfigPath(RUNTIME_STATE_FILE);
+    if (!std::filesystem::exists(inputPath)) {
+        log("MAIN", "Runtime state file not found, starting with empty contexts: " + inputPath);
+        return;
+    }
+
+    std::ifstream stateFile(inputPath);
+    if (!stateFile) {
+        throw std::runtime_error("Failed to open runtime state file: " + inputPath);
+    }
+
+    std::ostringstream buffer;
+    buffer << stateFile.rdbuf();
+    const std::string json = buffer.str();
+
+    size_t arrayStart = 0;
+    size_t arrayEnd = 0;
+
+    std::vector<PDPContext> loadedPdpContexts;
+    if (findJsonArrayBounds(json, "pdp_contexts", arrayStart, arrayEnd)) {
+        const auto objects = splitTopLevelJsonObjects(json.substr(arrayStart, arrayEnd - arrayStart));
+        for (const auto& object : objects) {
+            PDPContext context;
+            uint64_t number = 0;
+            std::string timestamp;
+
+            if (extractJsonUintField(object, "teid", number)) {
+                context.teid = static_cast<uint32_t>(number);
+            }
+            if (extractJsonUintField(object, "sequence", number)) {
+                context.sequence = static_cast<uint16_t>(number);
+            }
+            if (extractJsonUintField(object, "pdp_type", number)) {
+                context.pdp_type = static_cast<uint8_t>(number);
+            }
+            extractJsonBoolField(object, "has_pdp_type", context.has_pdp_type);
+            if (extractJsonUintField(object, "last_message_type", number)) {
+                context.last_message_type = static_cast<uint8_t>(number);
+            }
+            extractJsonStringField(object, "peer_ip", context.peer_ip);
+            extractJsonStringField(object, "ggsn_ip", context.ggsn_ip);
+            extractJsonStringField(object, "imsi", context.imsi);
+            extractJsonStringField(object, "apn", context.apn);
+            if (extractJsonStringField(object, "updated_at", timestamp)) {
+                parseTimestamp(timestamp, context.updated_at);
+            }
+
+            loadedPdpContexts.push_back(context);
+        }
+    }
+
+    std::vector<UEContext> loadedUeContexts;
+    if (findJsonArrayBounds(json, "ue_contexts", arrayStart, arrayEnd)) {
+        const auto objects = splitTopLevelJsonObjects(json.substr(arrayStart, arrayEnd - arrayStart));
+        for (const auto& object : objects) {
+            UEContext context;
+            uint64_t number = 0;
+            std::string timestamp;
+
+            extractJsonStringField(object, "imsi", context.imsi);
+            extractJsonStringField(object, "guti", context.guti);
+            extractJsonStringField(object, "peer_id", context.peer_id);
+            extractJsonBoolField(object, "authenticated", context.authenticated);
+            extractJsonBoolField(object, "auth_request_sent", context.auth_request_sent);
+            extractJsonBoolField(object, "auth_response_received", context.auth_response_received);
+            extractJsonBoolField(object, "security_mode_command_sent", context.security_mode_command_sent);
+            extractJsonBoolField(object, "security_mode_complete", context.security_mode_complete);
+            extractJsonBoolField(object, "attach_accept_sent", context.attach_accept_sent);
+            extractJsonBoolField(object, "attach_complete_received", context.attach_complete_received);
+            extractJsonBoolField(object, "attached", context.attached);
+            extractJsonBoolField(object, "service_request_received", context.service_request_received);
+            extractJsonBoolField(object, "service_accept_sent", context.service_accept_sent);
+            extractJsonBoolField(object, "service_active", context.service_active);
+            extractJsonBoolField(object, "service_resume_request_received", context.service_resume_request_received);
+            extractJsonBoolField(object, "service_resume_accept_sent", context.service_resume_accept_sent);
+            extractJsonBoolField(object, "service_release_request_received", context.service_release_request_received);
+            extractJsonBoolField(object, "service_release_complete_sent", context.service_release_complete_sent);
+            extractJsonBoolField(object, "detach_request_received", context.detach_request_received);
+            extractJsonBoolField(object, "detach_accept_sent", context.detach_accept_sent);
+            extractJsonBoolField(object, "detached", context.detached);
+            extractJsonBoolField(object, "tracking_area_update_request_received", context.tracking_area_update_request_received);
+            extractJsonBoolField(object, "tracking_area_update_accept_sent", context.tracking_area_update_accept_sent);
+            extractJsonBoolField(object, "tracking_area_update_complete_received", context.tracking_area_update_complete_received);
+            if (extractJsonUintField(object, "last_nas_message_type", number)) {
+                context.last_nas_message_type = static_cast<uint8_t>(number);
+            }
+            extractJsonBoolField(object, "has_last_nas_message_type", context.has_last_nas_message_type);
+            if (extractJsonUintField(object, "last_s1ap_procedure", number)) {
+                context.last_s1ap_procedure = static_cast<uint8_t>(number);
+            }
+            if (extractJsonUintField(object, "security_context_id", number)) {
+                context.security_context_id = static_cast<uint8_t>(number);
+            }
+            extractJsonBoolField(object, "has_security_context_id", context.has_security_context_id);
+            if (extractJsonUintField(object, "selected_nas_algorithm", number)) {
+                context.selected_nas_algorithm = static_cast<uint8_t>(number);
+            }
+            extractJsonBoolField(object, "has_selected_nas_algorithm", context.has_selected_nas_algorithm);
+            if (extractJsonUintField(object, "default_bearer_id", number)) {
+                context.default_bearer_id = static_cast<uint8_t>(number);
+            }
+            extractJsonBoolField(object, "has_default_bearer_id", context.has_default_bearer_id);
+            if (extractJsonUintField(object, "tracking_area_code", number)) {
+                context.tracking_area_code = static_cast<uint8_t>(number);
+            }
+            extractJsonBoolField(object, "has_tracking_area_code", context.has_tracking_area_code);
+            if (extractJsonStringField(object, "updated_at", timestamp)) {
+                parseTimestamp(timestamp, context.updated_at);
+            }
+
+            if (!context.imsi.empty()) {
+                loadedUeContexts.push_back(context);
+            }
+        }
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(stateMutex);
+        for (const auto& context : loadedPdpContexts) {
+            pdpContexts[context.teid] = context;
+        }
+        for (const auto& context : loadedUeContexts) {
+            ueContexts[context.imsi] = context;
+        }
+    }
+
+    std::ostringstream message;
+    message << "Runtime state loaded from " << inputPath
+            << " (ue_contexts=" << loadedUeContexts.size()
+            << ", pdp_contexts=" << loadedPdpContexts.size() << ")";
+    log("MAIN", message.str());
 }
 
 bool VNodeController::tryGetUeContext(const std::string& imsi, UEContext& context) const {
@@ -1628,6 +2210,105 @@ bool VNodeController::handleDemoS1apMessage(NativeSocket clientSocket,
                      << ", auth_flow=" << formatAuthFlowState(context);
     log("S1AP", parsedMessageLog.str());
 
+    if (message.nasMessageType == 0x50) {
+        vepc::DemoNasServiceResumeRequest requestInfo;
+        if (!vepc::parseNasServiceResumeRequest(message.nasPdu, requestInfo, parseError)) {
+            log("S1AP", "Rejected demo Service Resume Request from " + peerId + ": " + parseError);
+            return false;
+        }
+        if (!context.attached || context.service_active || !context.tracking_area_update_complete_received || !context.has_security_context_id) {
+            log("S1AP", "Rejected demo Service Resume Request from " + peerId + ": UE is not in tau-updated idle state for IMSI " + message.imsi);
+            return false;
+        }
+        if (!requestInfo.hasKeySetIdentifier || requestInfo.keySetIdentifier != context.security_context_id) {
+            std::ostringstream mismatch;
+            mismatch << "Rejected demo Service Resume Request from " << peerId
+                     << ": security context mismatch for IMSI " << message.imsi
+                     << " (expected=" << formatSecurityContextIdValue(context)
+                     << ", got=0x" << std::uppercase << std::hex << std::setw(2) << std::setfill('0')
+                     << static_cast<int>(requestInfo.keySetIdentifier) << std::dec << std::setfill(' ') << ")";
+            log("S1AP", mismatch.str());
+            return false;
+        }
+
+        const std::vector<uint8_t> serviceResumeAcceptNas = vepc::buildNasServiceResumeAccept(context.security_context_id, 0x05);
+        vepc::DemoNasServiceResumeAccept acceptInfo;
+        if (!vepc::parseNasServiceResumeAccept(serviceResumeAcceptNas, acceptInfo, parseError)) {
+            log("S1AP", "Failed to build demo Service Resume Accept for IMSI " + message.imsi + ": " + parseError);
+            return false;
+        }
+
+        context.service_request_received = false;
+        context.service_accept_sent = false;
+        context.service_active = true;
+        context.service_resume_request_received = true;
+        context.service_resume_accept_sent = true;
+        context.service_release_request_received = false;
+        context.service_release_complete_sent = false;
+        context.detach_request_received = false;
+        context.detach_accept_sent = false;
+        context.detached = false;
+        context.tracking_area_update_request_received = false;
+        context.tracking_area_update_accept_sent = false;
+        context.tracking_area_update_complete_received = false;
+        context.default_bearer_id = acceptInfo.bearerId;
+        context.has_default_bearer_id = acceptInfo.hasBearerId;
+
+        const std::vector<uint8_t> response = vepc::buildDemoDownlinkNasTransport(message.imsi, context.guti, serviceResumeAcceptNas);
+        const int sent = send(clientSocket,
+#ifdef _WIN32
+                              reinterpret_cast<const char*>(response.data()),
+#else
+                              response.data(),
+#endif
+                              static_cast<int>(response.size()),
+                              0);
+        if (sent != static_cast<int>(response.size())) {
+            log("S1AP", "Failed to send demo Service Resume Accept to " + peerId + ": " + getSocketErrorText());
+            return false;
+        }
+
+        upsertUeContext(context);
+
+        std::ostringstream responseLog;
+        responseLog << "Sent demo Downlink NAS Transport to " << peerId
+                    << ": s1ap=" << vepc::formatS1apProcedureCode(0x0D)
+                    << ", nas=" << vepc::formatNasMessageType(serviceResumeAcceptNas.front())
+                    << ", bytes=" << response.size()
+                    << ", security_context=" << formatSecurityContextIdValue(context)
+                    << ", bearer_id=" << formatBearerIdValue(context)
+                    << ", tracking_area=" << formatTrackingAreaCodeValue(context);
+        log("S1AP", responseLog.str());
+        return true;
+    }
+
+    if (message.nasMessageType == 0x4A) {
+        vepc::DemoNasTrackingAreaUpdateComplete completeInfo;
+        if (!vepc::parseNasTrackingAreaUpdateComplete(message.nasPdu, completeInfo, parseError)) {
+            log("S1AP", "Rejected demo Tracking Area Update Complete from " + peerId + ": " + parseError);
+            return false;
+        }
+        if (!context.attached || !context.tracking_area_update_accept_sent || !context.has_security_context_id) {
+            log("S1AP", "Rejected demo Tracking Area Update Complete from " + peerId + ": no pending TAU accept for IMSI " + message.imsi);
+            return false;
+        }
+        if (!completeInfo.hasKeySetIdentifier || completeInfo.keySetIdentifier != context.security_context_id) {
+            std::ostringstream mismatch;
+            mismatch << "Rejected demo Tracking Area Update Complete from " << peerId
+                     << ": security context mismatch for IMSI " << message.imsi
+                     << " (expected=" << formatSecurityContextIdValue(context)
+                     << ", got=0x" << std::uppercase << std::hex << std::setw(2) << std::setfill('0')
+                     << static_cast<int>(completeInfo.keySetIdentifier) << std::dec << std::setfill(' ') << ")";
+            log("S1AP", mismatch.str());
+            return false;
+        }
+
+        context.tracking_area_update_complete_received = true;
+        upsertUeContext(context);
+        log("S1AP", "Tracking Area Update Complete accepted for IMSI " + message.imsi);
+        return true;
+    }
+
     if (message.nasMessageType == 0x48) {
         vepc::DemoNasTrackingAreaUpdateRequest requestInfo;
         if (!vepc::parseNasTrackingAreaUpdateRequest(message.nasPdu, requestInfo, parseError)) {
@@ -1659,6 +2340,9 @@ bool VNodeController::handleDemoS1apMessage(NativeSocket clientSocket,
 
         context.tracking_area_update_request_received = true;
         context.tracking_area_update_accept_sent = true;
+        context.tracking_area_update_complete_received = false;
+        context.service_resume_request_received = false;
+        context.service_resume_accept_sent = false;
         context.tracking_area_code = acceptInfo.trackingAreaCode;
         context.has_tracking_area_code = acceptInfo.hasTrackingAreaCode;
         context.detach_request_received = false;
@@ -1734,6 +2418,8 @@ bool VNodeController::handleDemoS1apMessage(NativeSocket clientSocket,
         context.service_request_received = false;
         context.service_accept_sent = false;
         context.service_active = false;
+        context.service_resume_request_received = false;
+        context.service_resume_accept_sent = false;
         context.service_release_request_received = false;
         context.service_release_complete_sent = false;
         context.has_security_context_id = false;
@@ -1744,6 +2430,7 @@ bool VNodeController::handleDemoS1apMessage(NativeSocket clientSocket,
         context.default_bearer_id = 0;
         context.tracking_area_update_request_received = false;
         context.tracking_area_update_accept_sent = false;
+        context.tracking_area_update_complete_received = false;
         context.has_tracking_area_code = false;
         context.tracking_area_code = 0;
 
@@ -1805,11 +2492,14 @@ bool VNodeController::handleDemoS1apMessage(NativeSocket clientSocket,
         context.service_request_received = false;
         context.service_accept_sent = false;
         context.service_active = false;
+        context.service_resume_request_received = false;
+        context.service_resume_accept_sent = false;
         context.detach_request_received = false;
         context.detach_accept_sent = false;
         context.detached = false;
         context.tracking_area_update_request_received = false;
         context.tracking_area_update_accept_sent = false;
+        context.tracking_area_update_complete_received = false;
 
         const std::vector<uint8_t> response = vepc::buildDemoDownlinkNasTransport(message.imsi, context.guti, releaseCompleteNas);
         const int sent = send(clientSocket,
@@ -1869,6 +2559,8 @@ bool VNodeController::handleDemoS1apMessage(NativeSocket clientSocket,
         context.service_request_received = true;
         context.service_accept_sent = true;
         context.service_active = true;
+        context.service_resume_request_received = false;
+        context.service_resume_accept_sent = false;
         context.service_release_request_received = false;
         context.service_release_complete_sent = false;
         context.detach_request_received = false;
@@ -1876,6 +2568,7 @@ bool VNodeController::handleDemoS1apMessage(NativeSocket clientSocket,
         context.detached = false;
         context.tracking_area_update_request_received = false;
         context.tracking_area_update_accept_sent = false;
+        context.tracking_area_update_complete_received = false;
         context.default_bearer_id = acceptInfo.bearerId;
         context.has_default_bearer_id = acceptInfo.hasBearerId;
 
@@ -1932,6 +2625,8 @@ bool VNodeController::handleDemoS1apMessage(NativeSocket clientSocket,
         context.service_request_received = false;
         context.service_accept_sent = false;
         context.service_active = false;
+        context.service_resume_request_received = false;
+        context.service_resume_accept_sent = false;
         context.service_release_request_received = false;
         context.service_release_complete_sent = false;
         context.detach_request_received = false;
@@ -1939,6 +2634,7 @@ bool VNodeController::handleDemoS1apMessage(NativeSocket clientSocket,
         context.detached = false;
         context.tracking_area_update_request_received = false;
         context.tracking_area_update_accept_sent = false;
+        context.tracking_area_update_complete_received = false;
         context.has_default_bearer_id = false;
         context.default_bearer_id = 0;
         upsertUeContext(context);
@@ -1988,6 +2684,7 @@ bool VNodeController::handleDemoS1apMessage(NativeSocket clientSocket,
         context.detached = false;
         context.tracking_area_update_request_received = false;
         context.tracking_area_update_accept_sent = false;
+        context.tracking_area_update_complete_received = false;
         context.has_default_bearer_id = false;
         context.default_bearer_id = 0;
 
@@ -2114,6 +2811,7 @@ bool VNodeController::handleDemoS1apMessage(NativeSocket clientSocket,
     context.detached = false;
     context.tracking_area_update_request_received = false;
     context.tracking_area_update_accept_sent = false;
+    context.tracking_area_update_complete_received = false;
     context.security_context_id = requestInfo.keySetIdentifier;
     context.has_security_context_id = requestInfo.hasKeySetIdentifier;
     context.has_selected_nas_algorithm = false;
@@ -2641,6 +3339,12 @@ void VNodeController::start() {
     if (!logFile.is_open())
         log("MAIN", "Failed to open log file: " LOG_FILE);
 
+    try {
+        loadRuntimeStateFromFile();
+    } catch (const std::exception& ex) {
+        log("MAIN", std::string("Failed to load runtime state: ") + ex.what());
+    }
+
     mmeThread  = std::thread(&VNodeController::mmeThreadFunc,      this);
     sgsnThread = std::thread(&VNodeController::sgsnThreadFunc,     this);
     gtpThread  = std::thread(&VNodeController::gtpServerThreadFunc,this);
@@ -2653,6 +3357,13 @@ void VNodeController::start() {
 
 void VNodeController::stop() {
     if (!running) return;
+
+    try {
+        saveRuntimeStateToFile();
+    } catch (const std::exception& ex) {
+        log("MAIN", std::string("Failed to save runtime state: ") + ex.what());
+    }
+
     running = false;
     closeCliListenSocket();
 
