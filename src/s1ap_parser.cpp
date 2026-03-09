@@ -123,6 +123,22 @@ std::string formatNasMessageType(uint8_t messageType) {
         return "Attach Accept (0x42)";
     case 0x43:
         return "Attach Complete (0x43)";
+    case 0x4C:
+        return "Service Request (0x4C)";
+    case 0x4D:
+        return "Service Accept (0x4D)";
+    case 0x4E:
+        return "Service Release Request (0x4E)";
+    case 0x4F:
+        return "Service Release Complete (0x4F)";
+    case 0x45:
+        return "Detach Request (0x45)";
+    case 0x46:
+        return "Detach Accept (0x46)";
+    case 0x48:
+        return "Tracking Area Update Request (0x48)";
+    case 0x49:
+        return "Tracking Area Update Accept (0x49)";
     default: {
         std::ostringstream oss;
         oss << "0x" << std::uppercase << std::hex << std::setw(2) << std::setfill('0')
@@ -268,6 +284,182 @@ bool parseNasAttachComplete(const std::vector<uint8_t>& nasPdu,
     return true;
 }
 
+bool parseNasServiceRequest(const std::vector<uint8_t>& nasPdu,
+                            DemoNasServiceRequest& request,
+                            std::string& error) {
+    request = {};
+    error.clear();
+
+    if (nasPdu.size() < 3) {
+        error = "demo Service Request is too short";
+        return false;
+    }
+    if (nasPdu[0] != 0x4C) {
+        error = "unexpected NAS message type for Service Request: " + formatNasMessageType(nasPdu[0]);
+        return false;
+    }
+
+    request.keySetIdentifier = nasPdu[1];
+    request.serviceType = nasPdu[2];
+    request.hasKeySetIdentifier = true;
+    request.hasServiceType = true;
+    return true;
+}
+
+bool parseNasServiceAccept(const std::vector<uint8_t>& nasPdu,
+                           DemoNasServiceAccept& accept,
+                           std::string& error) {
+    accept = {};
+    error.clear();
+
+    if (nasPdu.size() < 3) {
+        error = "demo Service Accept is too short";
+        return false;
+    }
+    if (nasPdu[0] != 0x4D) {
+        error = "unexpected NAS message type for Service Accept: " + formatNasMessageType(nasPdu[0]);
+        return false;
+    }
+
+    accept.keySetIdentifier = nasPdu[1];
+    accept.bearerId = nasPdu[2];
+    accept.hasKeySetIdentifier = true;
+    accept.hasBearerId = true;
+    return true;
+}
+
+bool parseNasServiceReleaseRequest(const std::vector<uint8_t>& nasPdu,
+                                   DemoNasServiceReleaseRequest& request,
+                                   std::string& error) {
+    request = {};
+    error.clear();
+
+    if (nasPdu.size() < 3) {
+        error = "demo Service Release Request is too short";
+        return false;
+    }
+    if (nasPdu[0] != 0x4E) {
+        error = "unexpected NAS message type for Service Release Request: " + formatNasMessageType(nasPdu[0]);
+        return false;
+    }
+
+    request.keySetIdentifier = nasPdu[1];
+    request.releaseCause = nasPdu[2];
+    request.hasKeySetIdentifier = true;
+    request.hasReleaseCause = true;
+    return true;
+}
+
+bool parseNasServiceReleaseComplete(const std::vector<uint8_t>& nasPdu,
+                                    DemoNasServiceReleaseComplete& complete,
+                                    std::string& error) {
+    complete = {};
+    error.clear();
+
+    if (nasPdu.size() < 3) {
+        error = "demo Service Release Complete is too short";
+        return false;
+    }
+    if (nasPdu[0] != 0x4F) {
+        error = "unexpected NAS message type for Service Release Complete: " + formatNasMessageType(nasPdu[0]);
+        return false;
+    }
+
+    complete.keySetIdentifier = nasPdu[1];
+    complete.releaseResult = nasPdu[2];
+    complete.hasKeySetIdentifier = true;
+    complete.hasReleaseResult = true;
+    return true;
+}
+
+bool parseNasDetachRequest(const std::vector<uint8_t>& nasPdu,
+                           DemoNasDetachRequest& request,
+                           std::string& error) {
+    request = {};
+    error.clear();
+
+    if (nasPdu.size() < 3) {
+        error = "demo Detach Request is too short";
+        return false;
+    }
+    if (nasPdu[0] != 0x45) {
+        error = "unexpected NAS message type for Detach Request: " + formatNasMessageType(nasPdu[0]);
+        return false;
+    }
+
+    request.keySetIdentifier = nasPdu[1];
+    request.detachType = nasPdu[2];
+    request.hasKeySetIdentifier = true;
+    request.hasDetachType = true;
+    return true;
+}
+
+bool parseNasDetachAccept(const std::vector<uint8_t>& nasPdu,
+                          DemoNasDetachAccept& accept,
+                          std::string& error) {
+    accept = {};
+    error.clear();
+
+    if (nasPdu.size() < 3) {
+        error = "demo Detach Accept is too short";
+        return false;
+    }
+    if (nasPdu[0] != 0x46) {
+        error = "unexpected NAS message type for Detach Accept: " + formatNasMessageType(nasPdu[0]);
+        return false;
+    }
+
+    accept.keySetIdentifier = nasPdu[1];
+    accept.detachResult = nasPdu[2];
+    accept.hasKeySetIdentifier = true;
+    accept.hasDetachResult = true;
+    return true;
+}
+
+bool parseNasTrackingAreaUpdateRequest(const std::vector<uint8_t>& nasPdu,
+                                       DemoNasTrackingAreaUpdateRequest& request,
+                                       std::string& error) {
+    request = {};
+    error.clear();
+
+    if (nasPdu.size() < 3) {
+        error = "demo Tracking Area Update Request is too short";
+        return false;
+    }
+    if (nasPdu[0] != 0x48) {
+        error = "unexpected NAS message type for Tracking Area Update Request: " + formatNasMessageType(nasPdu[0]);
+        return false;
+    }
+
+    request.keySetIdentifier = nasPdu[1];
+    request.trackingAreaCode = nasPdu[2];
+    request.hasKeySetIdentifier = true;
+    request.hasTrackingAreaCode = true;
+    return true;
+}
+
+bool parseNasTrackingAreaUpdateAccept(const std::vector<uint8_t>& nasPdu,
+                                      DemoNasTrackingAreaUpdateAccept& accept,
+                                      std::string& error) {
+    accept = {};
+    error.clear();
+
+    if (nasPdu.size() < 3) {
+        error = "demo Tracking Area Update Accept is too short";
+        return false;
+    }
+    if (nasPdu[0] != 0x49) {
+        error = "unexpected NAS message type for Tracking Area Update Accept: " + formatNasMessageType(nasPdu[0]);
+        return false;
+    }
+
+    accept.keySetIdentifier = nasPdu[1];
+    accept.trackingAreaCode = nasPdu[2];
+    accept.hasKeySetIdentifier = true;
+    accept.hasTrackingAreaCode = true;
+    return true;
+}
+
 std::vector<uint8_t> buildNasAuthenticationRequest(uint8_t keySetIdentifier) {
     return {
         0x52,
@@ -290,6 +482,42 @@ std::vector<uint8_t> buildNasAttachAccept(uint8_t keySetIdentifier,
         0x42,
         keySetIdentifier,
         attachResult,
+    };
+}
+
+std::vector<uint8_t> buildNasServiceAccept(uint8_t keySetIdentifier,
+                                           uint8_t bearerId) {
+    return {
+        0x4D,
+        keySetIdentifier,
+        bearerId,
+    };
+}
+
+std::vector<uint8_t> buildNasServiceReleaseComplete(uint8_t keySetIdentifier,
+                                                    uint8_t releaseResult) {
+    return {
+        0x4F,
+        keySetIdentifier,
+        releaseResult,
+    };
+}
+
+std::vector<uint8_t> buildNasDetachAccept(uint8_t keySetIdentifier,
+                                          uint8_t detachResult) {
+    return {
+        0x46,
+        keySetIdentifier,
+        detachResult,
+    };
+}
+
+std::vector<uint8_t> buildNasTrackingAreaUpdateAccept(uint8_t keySetIdentifier,
+                                                      uint8_t trackingAreaCode) {
+    return {
+        0x49,
+        keySetIdentifier,
+        trackingAreaCode,
     };
 }
 

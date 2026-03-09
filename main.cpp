@@ -97,6 +97,16 @@ struct UEContext {
     bool        attach_accept_sent = false;
     bool        attach_complete_received = false;
     bool        attached = false;
+    bool        service_request_received = false;
+    bool        service_accept_sent = false;
+    bool        service_active = false;
+    bool        service_release_request_received = false;
+    bool        service_release_complete_sent = false;
+    bool        detach_request_received = false;
+    bool        detach_accept_sent = false;
+    bool        detached = false;
+    bool        tracking_area_update_request_received = false;
+    bool        tracking_area_update_accept_sent = false;
     uint8_t     last_nas_message_type = 0;
     bool        has_last_nas_message_type = false;
     uint8_t     last_s1ap_procedure = 0;
@@ -104,6 +114,10 @@ struct UEContext {
     bool        has_security_context_id = false;
     uint8_t     selected_nas_algorithm = 0;
     bool        has_selected_nas_algorithm = false;
+    uint8_t     default_bearer_id = 0;
+    bool        has_default_bearer_id = false;
+    uint8_t     tracking_area_code = 0;
+    bool        has_tracking_area_code = false;
     std::time_t updated_at = 0;
 };
 
@@ -483,6 +497,21 @@ static std::string formatSecurityContextIdValue(const UEContext& context) {
 }
 
 static std::string formatAuthFlowState(const UEContext& context) {
+    if (context.detached || context.detach_accept_sent) {
+        return "detached";
+    }
+    if (context.tracking_area_update_accept_sent) {
+        return "tau-updated";
+    }
+    if (context.service_active) {
+        return "service-active";
+    }
+    if (context.service_release_complete_sent) {
+        return "attached-idle";
+    }
+    if (context.service_accept_sent) {
+        return "service-accept-sent";
+    }
     if (context.attached || context.attach_complete_received) {
         return "attach-complete";
     }
@@ -510,6 +539,17 @@ static std::string formatAuthFlowState(const UEContext& context) {
     return "idle";
 }
 
+static std::string formatBearerIdValue(const UEContext& context) {
+    if (!context.has_default_bearer_id) {
+        return "n/a";
+    }
+
+    std::ostringstream oss;
+    oss << "0x" << std::uppercase << std::hex << std::setw(2) << std::setfill('0')
+        << static_cast<int>(context.default_bearer_id);
+    return oss.str();
+}
+
 static std::string formatNasAlgorithmValue(const UEContext& context) {
     if (!context.has_selected_nas_algorithm) {
         return "n/a";
@@ -518,6 +558,17 @@ static std::string formatNasAlgorithmValue(const UEContext& context) {
     std::ostringstream oss;
     oss << "0x" << std::uppercase << std::hex << std::setw(2) << std::setfill('0')
         << static_cast<int>(context.selected_nas_algorithm);
+    return oss.str();
+}
+
+static std::string formatTrackingAreaCodeValue(const UEContext& context) {
+    if (!context.has_tracking_area_code) {
+        return "n/a";
+    }
+
+    std::ostringstream oss;
+    oss << "0x" << std::uppercase << std::hex << std::setw(2) << std::setfill('0')
+        << static_cast<int>(context.tracking_area_code);
     return oss.str();
 }
 
@@ -1412,6 +1463,8 @@ std::string VNodeController::formatStateSnapshotLocked() const {
             oss << "  NAS Message: " << formatNasMessageTypeValue(context) << "\n";
             oss << "  Security Context ID: " << formatSecurityContextIdValue(context) << "\n";
             oss << "  NAS Algorithm: " << formatNasAlgorithmValue(context) << "\n";
+            oss << "  Default Bearer ID: " << formatBearerIdValue(context) << "\n";
+            oss << "  Tracking Area Code: " << formatTrackingAreaCodeValue(context) << "\n";
             oss << "  Auth Flow: " << formatAuthFlowState(context) << "\n";
             oss << "  Auth Request Sent: " << (context.auth_request_sent ? "yes" : "no") << "\n";
             oss << "  Auth Response Received: " << (context.auth_response_received ? "yes" : "no") << "\n";
@@ -1420,6 +1473,16 @@ std::string VNodeController::formatStateSnapshotLocked() const {
             oss << "  Attach Accept Sent: " << (context.attach_accept_sent ? "yes" : "no") << "\n";
             oss << "  Attach Complete Received: " << (context.attach_complete_received ? "yes" : "no") << "\n";
             oss << "  Attached: " << (context.attached ? "yes" : "no") << "\n";
+            oss << "  Service Request Received: " << (context.service_request_received ? "yes" : "no") << "\n";
+            oss << "  Service Accept Sent: " << (context.service_accept_sent ? "yes" : "no") << "\n";
+            oss << "  Service Active: " << (context.service_active ? "yes" : "no") << "\n";
+            oss << "  Service Release Request Received: " << (context.service_release_request_received ? "yes" : "no") << "\n";
+            oss << "  Service Release Complete Sent: " << (context.service_release_complete_sent ? "yes" : "no") << "\n";
+            oss << "  Detach Request Received: " << (context.detach_request_received ? "yes" : "no") << "\n";
+            oss << "  Detach Accept Sent: " << (context.detach_accept_sent ? "yes" : "no") << "\n";
+            oss << "  Detached: " << (context.detached ? "yes" : "no") << "\n";
+            oss << "  TAU Request Received: " << (context.tracking_area_update_request_received ? "yes" : "no") << "\n";
+            oss << "  TAU Accept Sent: " << (context.tracking_area_update_accept_sent ? "yes" : "no") << "\n";
             oss << "  Authenticated: " << (context.authenticated ? "yes" : "no") << "\n";
             oss << "  Updated At: " << formatTimestamp(context.updated_at) << "\n";
         }
@@ -1565,6 +1628,284 @@ bool VNodeController::handleDemoS1apMessage(NativeSocket clientSocket,
                      << ", auth_flow=" << formatAuthFlowState(context);
     log("S1AP", parsedMessageLog.str());
 
+    if (message.nasMessageType == 0x48) {
+        vepc::DemoNasTrackingAreaUpdateRequest requestInfo;
+        if (!vepc::parseNasTrackingAreaUpdateRequest(message.nasPdu, requestInfo, parseError)) {
+            log("S1AP", "Rejected demo Tracking Area Update Request from " + peerId + ": " + parseError);
+            return false;
+        }
+        if (!context.attached || context.service_active || !context.has_security_context_id) {
+            log("S1AP", "Rejected demo Tracking Area Update Request from " + peerId + ": UE is not in attached-idle for IMSI " + message.imsi);
+            return false;
+        }
+        if (!requestInfo.hasKeySetIdentifier || requestInfo.keySetIdentifier != context.security_context_id) {
+            std::ostringstream mismatch;
+            mismatch << "Rejected demo Tracking Area Update Request from " << peerId
+                     << ": security context mismatch for IMSI " << message.imsi
+                     << " (expected=" << formatSecurityContextIdValue(context)
+                     << ", got=0x" << std::uppercase << std::hex << std::setw(2) << std::setfill('0')
+                     << static_cast<int>(requestInfo.keySetIdentifier) << std::dec << std::setfill(' ') << ")";
+            log("S1AP", mismatch.str());
+            return false;
+        }
+
+        const std::vector<uint8_t> tauAcceptNas = vepc::buildNasTrackingAreaUpdateAccept(context.security_context_id,
+                                                                                           requestInfo.trackingAreaCode);
+        vepc::DemoNasTrackingAreaUpdateAccept acceptInfo;
+        if (!vepc::parseNasTrackingAreaUpdateAccept(tauAcceptNas, acceptInfo, parseError)) {
+            log("S1AP", "Failed to build demo Tracking Area Update Accept for IMSI " + message.imsi + ": " + parseError);
+            return false;
+        }
+
+        context.tracking_area_update_request_received = true;
+        context.tracking_area_update_accept_sent = true;
+        context.tracking_area_code = acceptInfo.trackingAreaCode;
+        context.has_tracking_area_code = acceptInfo.hasTrackingAreaCode;
+        context.detach_request_received = false;
+        context.detach_accept_sent = false;
+        context.detached = false;
+
+        const std::vector<uint8_t> response = vepc::buildDemoDownlinkNasTransport(message.imsi, context.guti, tauAcceptNas);
+        const int sent = send(clientSocket,
+#ifdef _WIN32
+                              reinterpret_cast<const char*>(response.data()),
+#else
+                              response.data(),
+#endif
+                              static_cast<int>(response.size()),
+                              0);
+        if (sent != static_cast<int>(response.size())) {
+            log("S1AP", "Failed to send demo Tracking Area Update Accept to " + peerId + ": " + getSocketErrorText());
+            return false;
+        }
+
+        upsertUeContext(context);
+
+        std::ostringstream responseLog;
+        responseLog << "Sent demo Downlink NAS Transport to " << peerId
+                    << ": s1ap=" << vepc::formatS1apProcedureCode(0x0D)
+                    << ", nas=" << vepc::formatNasMessageType(tauAcceptNas.front())
+                    << ", bytes=" << response.size()
+                    << ", security_context=" << formatSecurityContextIdValue(context)
+                    << ", tracking_area=" << formatTrackingAreaCodeValue(context);
+        log("S1AP", responseLog.str());
+        return true;
+    }
+
+    if (message.nasMessageType == 0x45) {
+        vepc::DemoNasDetachRequest requestInfo;
+        if (!vepc::parseNasDetachRequest(message.nasPdu, requestInfo, parseError)) {
+            log("S1AP", "Rejected demo Detach Request from " + peerId + ": " + parseError);
+            return false;
+        }
+        if (!context.attached || !context.has_security_context_id) {
+            log("S1AP", "Rejected demo Detach Request from " + peerId + ": UE is not attached for IMSI " + message.imsi);
+            return false;
+        }
+        if (!requestInfo.hasKeySetIdentifier || requestInfo.keySetIdentifier != context.security_context_id) {
+            std::ostringstream mismatch;
+            mismatch << "Rejected demo Detach Request from " << peerId
+                     << ": security context mismatch for IMSI " << message.imsi
+                     << " (expected=" << formatSecurityContextIdValue(context)
+                     << ", got=0x" << std::uppercase << std::hex << std::setw(2) << std::setfill('0')
+                     << static_cast<int>(requestInfo.keySetIdentifier) << std::dec << std::setfill(' ') << ")";
+            log("S1AP", mismatch.str());
+            return false;
+        }
+
+        const std::vector<uint8_t> detachAcceptNas = vepc::buildNasDetachAccept(context.security_context_id, 0x00);
+        vepc::DemoNasDetachAccept acceptInfo;
+        if (!vepc::parseNasDetachAccept(detachAcceptNas, acceptInfo, parseError)) {
+            log("S1AP", "Failed to build demo Detach Accept for IMSI " + message.imsi + ": " + parseError);
+            return false;
+        }
+
+        context.detach_request_received = true;
+        context.detach_accept_sent = true;
+        context.detached = true;
+        context.authenticated = false;
+        context.auth_request_sent = false;
+        context.auth_response_received = false;
+        context.security_mode_command_sent = false;
+        context.security_mode_complete = false;
+        context.attach_accept_sent = false;
+        context.attach_complete_received = false;
+        context.attached = false;
+        context.service_request_received = false;
+        context.service_accept_sent = false;
+        context.service_active = false;
+        context.service_release_request_received = false;
+        context.service_release_complete_sent = false;
+        context.has_security_context_id = false;
+        context.security_context_id = 0;
+        context.has_selected_nas_algorithm = false;
+        context.selected_nas_algorithm = 0;
+        context.has_default_bearer_id = false;
+        context.default_bearer_id = 0;
+        context.tracking_area_update_request_received = false;
+        context.tracking_area_update_accept_sent = false;
+        context.has_tracking_area_code = false;
+        context.tracking_area_code = 0;
+
+        const std::vector<uint8_t> response = vepc::buildDemoDownlinkNasTransport(message.imsi, context.guti, detachAcceptNas);
+        const int sent = send(clientSocket,
+#ifdef _WIN32
+                              reinterpret_cast<const char*>(response.data()),
+#else
+                              response.data(),
+#endif
+                              static_cast<int>(response.size()),
+                              0);
+        if (sent != static_cast<int>(response.size())) {
+            log("S1AP", "Failed to send demo Detach Accept to " + peerId + ": " + getSocketErrorText());
+            return false;
+        }
+
+        upsertUeContext(context);
+
+        std::ostringstream responseLog;
+        responseLog << "Sent demo Downlink NAS Transport to " << peerId
+                    << ": s1ap=" << vepc::formatS1apProcedureCode(0x0D)
+                    << ", nas=" << vepc::formatNasMessageType(detachAcceptNas.front())
+                    << ", bytes=" << response.size();
+        log("S1AP", responseLog.str());
+        return true;
+    }
+
+    if (message.nasMessageType == 0x4E) {
+        vepc::DemoNasServiceReleaseRequest requestInfo;
+        if (!vepc::parseNasServiceReleaseRequest(message.nasPdu, requestInfo, parseError)) {
+            log("S1AP", "Rejected demo Service Release Request from " + peerId + ": " + parseError);
+            return false;
+        }
+        if (!context.attached || !context.service_active || !context.has_security_context_id) {
+            log("S1AP", "Rejected demo Service Release Request from " + peerId + ": UE has no active service for IMSI " + message.imsi);
+            return false;
+        }
+        if (!requestInfo.hasKeySetIdentifier || requestInfo.keySetIdentifier != context.security_context_id) {
+            std::ostringstream mismatch;
+            mismatch << "Rejected demo Service Release Request from " << peerId
+                     << ": security context mismatch for IMSI " << message.imsi
+                     << " (expected=" << formatSecurityContextIdValue(context)
+                     << ", got=0x" << std::uppercase << std::hex << std::setw(2) << std::setfill('0')
+                     << static_cast<int>(requestInfo.keySetIdentifier) << std::dec << std::setfill(' ') << ")";
+            log("S1AP", mismatch.str());
+            return false;
+        }
+
+        const std::vector<uint8_t> releaseCompleteNas = vepc::buildNasServiceReleaseComplete(context.security_context_id, 0x00);
+        vepc::DemoNasServiceReleaseComplete completeInfo;
+        if (!vepc::parseNasServiceReleaseComplete(releaseCompleteNas, completeInfo, parseError)) {
+            log("S1AP", "Failed to build demo Service Release Complete for IMSI " + message.imsi + ": " + parseError);
+            return false;
+        }
+
+        context.service_release_request_received = true;
+        context.service_release_complete_sent = true;
+        context.service_request_received = false;
+        context.service_accept_sent = false;
+        context.service_active = false;
+        context.detach_request_received = false;
+        context.detach_accept_sent = false;
+        context.detached = false;
+        context.tracking_area_update_request_received = false;
+        context.tracking_area_update_accept_sent = false;
+
+        const std::vector<uint8_t> response = vepc::buildDemoDownlinkNasTransport(message.imsi, context.guti, releaseCompleteNas);
+        const int sent = send(clientSocket,
+#ifdef _WIN32
+                              reinterpret_cast<const char*>(response.data()),
+#else
+                              response.data(),
+#endif
+                              static_cast<int>(response.size()),
+                              0);
+        if (sent != static_cast<int>(response.size())) {
+            log("S1AP", "Failed to send demo Service Release Complete to " + peerId + ": " + getSocketErrorText());
+            return false;
+        }
+
+        upsertUeContext(context);
+
+        std::ostringstream responseLog;
+        responseLog << "Sent demo Downlink NAS Transport to " << peerId
+                    << ": s1ap=" << vepc::formatS1apProcedureCode(0x0D)
+                    << ", nas=" << vepc::formatNasMessageType(releaseCompleteNas.front())
+                    << ", bytes=" << response.size()
+                    << ", security_context=" << formatSecurityContextIdValue(context)
+                    << ", bearer_id=" << formatBearerIdValue(context);
+        log("S1AP", responseLog.str());
+        return true;
+    }
+
+    if (message.nasMessageType == 0x4C) {
+        vepc::DemoNasServiceRequest requestInfo;
+        if (!vepc::parseNasServiceRequest(message.nasPdu, requestInfo, parseError)) {
+            log("S1AP", "Rejected demo Service Request from " + peerId + ": " + parseError);
+            return false;
+        }
+        if (!context.attached || !context.security_mode_complete || !context.has_security_context_id) {
+            log("S1AP", "Rejected demo Service Request from " + peerId + ": UE is not attached for IMSI " + message.imsi);
+            return false;
+        }
+        if (!requestInfo.hasKeySetIdentifier || requestInfo.keySetIdentifier != context.security_context_id) {
+            std::ostringstream mismatch;
+            mismatch << "Rejected demo Service Request from " << peerId
+                     << ": security context mismatch for IMSI " << message.imsi
+                     << " (expected=" << formatSecurityContextIdValue(context)
+                     << ", got=0x" << std::uppercase << std::hex << std::setw(2) << std::setfill('0')
+                     << static_cast<int>(requestInfo.keySetIdentifier) << std::dec << std::setfill(' ') << ")";
+            log("S1AP", mismatch.str());
+            return false;
+        }
+
+        const std::vector<uint8_t> serviceAcceptNas = vepc::buildNasServiceAccept(context.security_context_id, 0x05);
+        vepc::DemoNasServiceAccept acceptInfo;
+        if (!vepc::parseNasServiceAccept(serviceAcceptNas, acceptInfo, parseError)) {
+            log("S1AP", "Failed to build demo Service Accept for IMSI " + message.imsi + ": " + parseError);
+            return false;
+        }
+
+        context.service_request_received = true;
+        context.service_accept_sent = true;
+        context.service_active = true;
+        context.service_release_request_received = false;
+        context.service_release_complete_sent = false;
+        context.detach_request_received = false;
+        context.detach_accept_sent = false;
+        context.detached = false;
+        context.tracking_area_update_request_received = false;
+        context.tracking_area_update_accept_sent = false;
+        context.default_bearer_id = acceptInfo.bearerId;
+        context.has_default_bearer_id = acceptInfo.hasBearerId;
+
+        const std::vector<uint8_t> response = vepc::buildDemoDownlinkNasTransport(message.imsi, context.guti, serviceAcceptNas);
+        const int sent = send(clientSocket,
+#ifdef _WIN32
+                              reinterpret_cast<const char*>(response.data()),
+#else
+                              response.data(),
+#endif
+                              static_cast<int>(response.size()),
+                              0);
+        if (sent != static_cast<int>(response.size())) {
+            log("S1AP", "Failed to send demo Service Accept to " + peerId + ": " + getSocketErrorText());
+            return false;
+        }
+
+        upsertUeContext(context);
+
+        std::ostringstream responseLog;
+        responseLog << "Sent demo Downlink NAS Transport to " << peerId
+                    << ": s1ap=" << vepc::formatS1apProcedureCode(0x0D)
+                    << ", nas=" << vepc::formatNasMessageType(serviceAcceptNas.front())
+                    << ", bytes=" << response.size()
+                    << ", security_context=" << formatSecurityContextIdValue(context)
+                    << ", bearer_id=" << formatBearerIdValue(context);
+        log("S1AP", responseLog.str());
+        return true;
+    }
+
     if (message.nasMessageType == 0x43) {
         vepc::DemoNasAttachComplete completeInfo;
         if (!vepc::parseNasAttachComplete(message.nasPdu, completeInfo, parseError)) {
@@ -1588,6 +1929,18 @@ bool VNodeController::handleDemoS1apMessage(NativeSocket clientSocket,
 
         context.attach_complete_received = true;
         context.attached = true;
+        context.service_request_received = false;
+        context.service_accept_sent = false;
+        context.service_active = false;
+        context.service_release_request_received = false;
+        context.service_release_complete_sent = false;
+        context.detach_request_received = false;
+        context.detach_accept_sent = false;
+        context.detached = false;
+        context.tracking_area_update_request_received = false;
+        context.tracking_area_update_accept_sent = false;
+        context.has_default_bearer_id = false;
+        context.default_bearer_id = 0;
         upsertUeContext(context);
         log("S1AP", "Attach Complete accepted for IMSI " + message.imsi);
         return true;
@@ -1625,6 +1978,18 @@ bool VNodeController::handleDemoS1apMessage(NativeSocket clientSocket,
         context.attach_accept_sent = true;
         context.attach_complete_received = false;
         context.attached = false;
+        context.service_request_received = false;
+        context.service_accept_sent = false;
+        context.service_active = false;
+        context.service_release_request_received = false;
+        context.service_release_complete_sent = false;
+        context.detach_request_received = false;
+        context.detach_accept_sent = false;
+        context.detached = false;
+        context.tracking_area_update_request_received = false;
+        context.tracking_area_update_accept_sent = false;
+        context.has_default_bearer_id = false;
+        context.default_bearer_id = 0;
 
         const std::vector<uint8_t> response = vepc::buildDemoDownlinkNasTransport(message.imsi, context.guti, attachAcceptNas);
         const int sent = send(clientSocket,
@@ -1739,10 +2104,24 @@ bool VNodeController::handleDemoS1apMessage(NativeSocket clientSocket,
     context.attach_accept_sent = false;
     context.attach_complete_received = false;
     context.attached = false;
+    context.service_request_received = false;
+    context.service_accept_sent = false;
+    context.service_active = false;
+    context.service_release_request_received = false;
+    context.service_release_complete_sent = false;
+    context.detach_request_received = false;
+    context.detach_accept_sent = false;
+    context.detached = false;
+    context.tracking_area_update_request_received = false;
+    context.tracking_area_update_accept_sent = false;
     context.security_context_id = requestInfo.keySetIdentifier;
     context.has_security_context_id = requestInfo.hasKeySetIdentifier;
     context.has_selected_nas_algorithm = false;
     context.selected_nas_algorithm = 0;
+    context.has_default_bearer_id = false;
+    context.default_bearer_id = 0;
+    context.has_tracking_area_code = false;
+    context.tracking_area_code = 0;
 
     const std::vector<uint8_t> response = vepc::buildDemoDownlinkNasTransport(message.imsi, message.guti, nasResponse);
     const int sent = send(clientSocket,

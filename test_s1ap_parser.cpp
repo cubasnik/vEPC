@@ -29,6 +29,14 @@ int main() {
     vepc::DemoNasSecurityModeComplete securityModeComplete;
     vepc::DemoNasAttachAccept attachAccept;
     vepc::DemoNasAttachComplete attachComplete;
+    vepc::DemoNasServiceRequest serviceRequest;
+    vepc::DemoNasServiceAccept serviceAccept;
+    vepc::DemoNasServiceReleaseRequest serviceReleaseRequest;
+    vepc::DemoNasServiceReleaseComplete serviceReleaseComplete;
+    vepc::DemoNasDetachRequest detachRequest;
+    vepc::DemoNasDetachAccept detachAcceptResult;
+    vepc::DemoNasTrackingAreaUpdateRequest trackingAreaUpdateRequest;
+    vepc::DemoNasTrackingAreaUpdateAccept trackingAreaUpdateAccept;
 
     const std::vector<uint8_t> initialUeMessage = {
         0x0C,
@@ -49,6 +57,14 @@ int main() {
     ok &= expect(vepc::formatNasMessageType(0x5E) == "Security Mode Complete (0x5E)", "security mode complete formatter returns stable label");
     ok &= expect(vepc::formatNasMessageType(0x42) == "Attach Accept (0x42)", "attach accept formatter returns stable label");
     ok &= expect(vepc::formatNasMessageType(0x43) == "Attach Complete (0x43)", "attach complete formatter returns stable label");
+    ok &= expect(vepc::formatNasMessageType(0x4C) == "Service Request (0x4C)", "service request formatter returns stable label");
+    ok &= expect(vepc::formatNasMessageType(0x4D) == "Service Accept (0x4D)", "service accept formatter returns stable label");
+    ok &= expect(vepc::formatNasMessageType(0x4E) == "Service Release Request (0x4E)", "service release request formatter returns stable label");
+    ok &= expect(vepc::formatNasMessageType(0x4F) == "Service Release Complete (0x4F)", "service release complete formatter returns stable label");
+    ok &= expect(vepc::formatNasMessageType(0x45) == "Detach Request (0x45)", "detach request formatter returns stable label");
+    ok &= expect(vepc::formatNasMessageType(0x46) == "Detach Accept (0x46)", "detach accept formatter returns stable label");
+    ok &= expect(vepc::formatNasMessageType(0x48) == "Tracking Area Update Request (0x48)", "tau request formatter returns stable label");
+    ok &= expect(vepc::formatNasMessageType(0x49) == "Tracking Area Update Accept (0x49)", "tau accept formatter returns stable label");
 
     const std::vector<uint8_t> expectedAuthRequest = {0x52, 0x01};
     ok &= expect(vepc::buildNasAuthenticationRequest() == expectedAuthRequest,
@@ -116,6 +132,78 @@ int main() {
     ok &= expect(attachComplete.hasKeySetIdentifier && attachComplete.keySetIdentifier == 0x01,
                  "attach complete parser extracts key set identifier");
 
+    const std::vector<uint8_t> serviceRequestBytes = {0x4C, 0x01, 0x01};
+    ok &= expect(vepc::parseNasServiceRequest(serviceRequestBytes, serviceRequest, error),
+                 "service request parser accepts stable bytes");
+    ok &= expect(serviceRequest.hasKeySetIdentifier && serviceRequest.keySetIdentifier == 0x01,
+                 "service request parser extracts key set identifier");
+    ok &= expect(serviceRequest.hasServiceType && serviceRequest.serviceType == 0x01,
+                 "service request parser extracts service type");
+
+    const std::vector<uint8_t> expectedServiceAccept = {0x4D, 0x01, 0x05};
+    ok &= expect(vepc::buildNasServiceAccept() == expectedServiceAccept,
+                 "service accept bytes are stable");
+    ok &= expect(vepc::parseNasServiceAccept(expectedServiceAccept, serviceAccept, error),
+                 "service accept parser accepts stable bytes");
+    ok &= expect(serviceAccept.hasKeySetIdentifier && serviceAccept.keySetIdentifier == 0x01,
+                 "service accept parser extracts key set identifier");
+    ok &= expect(serviceAccept.hasBearerId && serviceAccept.bearerId == 0x05,
+                 "service accept parser extracts bearer id");
+
+    const std::vector<uint8_t> serviceReleaseRequestBytes = {0x4E, 0x01, 0x00};
+    ok &= expect(vepc::parseNasServiceReleaseRequest(serviceReleaseRequestBytes, serviceReleaseRequest, error),
+                 "service release request parser accepts stable bytes");
+    ok &= expect(serviceReleaseRequest.hasKeySetIdentifier && serviceReleaseRequest.keySetIdentifier == 0x01,
+                 "service release request parser extracts key set identifier");
+    ok &= expect(serviceReleaseRequest.hasReleaseCause && serviceReleaseRequest.releaseCause == 0x00,
+                 "service release request parser extracts release cause");
+
+    const std::vector<uint8_t> expectedServiceReleaseComplete = {0x4F, 0x01, 0x00};
+    ok &= expect(vepc::buildNasServiceReleaseComplete() == expectedServiceReleaseComplete,
+                 "service release complete bytes are stable");
+    ok &= expect(vepc::parseNasServiceReleaseComplete(expectedServiceReleaseComplete, serviceReleaseComplete, error),
+                 "service release complete parser accepts stable bytes");
+    ok &= expect(serviceReleaseComplete.hasKeySetIdentifier && serviceReleaseComplete.keySetIdentifier == 0x01,
+                 "service release complete parser extracts key set identifier");
+    ok &= expect(serviceReleaseComplete.hasReleaseResult && serviceReleaseComplete.releaseResult == 0x00,
+                 "service release complete parser extracts release result");
+
+    const std::vector<uint8_t> detachRequestBytes = {0x45, 0x01, 0x01};
+    ok &= expect(vepc::parseNasDetachRequest(detachRequestBytes, detachRequest, error),
+                 "detach request parser accepts stable bytes");
+    ok &= expect(detachRequest.hasKeySetIdentifier && detachRequest.keySetIdentifier == 0x01,
+                 "detach request parser extracts key set identifier");
+    ok &= expect(detachRequest.hasDetachType && detachRequest.detachType == 0x01,
+                 "detach request parser extracts detach type");
+
+    const std::vector<uint8_t> expectedDetachAccept = {0x46, 0x01, 0x00};
+    ok &= expect(vepc::buildNasDetachAccept() == expectedDetachAccept,
+                 "detach accept bytes are stable");
+    ok &= expect(vepc::parseNasDetachAccept(expectedDetachAccept, detachAcceptResult, error),
+                 "detach accept parser accepts stable bytes");
+    ok &= expect(detachAcceptResult.hasKeySetIdentifier && detachAcceptResult.keySetIdentifier == 0x01,
+                 "detach accept parser extracts key set identifier");
+    ok &= expect(detachAcceptResult.hasDetachResult && detachAcceptResult.detachResult == 0x00,
+                 "detach accept parser extracts detach result");
+
+    const std::vector<uint8_t> trackingAreaUpdateRequestBytes = {0x48, 0x01, 0x11};
+    ok &= expect(vepc::parseNasTrackingAreaUpdateRequest(trackingAreaUpdateRequestBytes, trackingAreaUpdateRequest, error),
+                 "tau request parser accepts stable bytes");
+    ok &= expect(trackingAreaUpdateRequest.hasKeySetIdentifier && trackingAreaUpdateRequest.keySetIdentifier == 0x01,
+                 "tau request parser extracts key set identifier");
+    ok &= expect(trackingAreaUpdateRequest.hasTrackingAreaCode && trackingAreaUpdateRequest.trackingAreaCode == 0x11,
+                 "tau request parser extracts tracking area code");
+
+    const std::vector<uint8_t> expectedTrackingAreaUpdateAccept = {0x49, 0x01, 0x11};
+    ok &= expect(vepc::buildNasTrackingAreaUpdateAccept() == expectedTrackingAreaUpdateAccept,
+                 "tau accept bytes are stable");
+    ok &= expect(vepc::parseNasTrackingAreaUpdateAccept(expectedTrackingAreaUpdateAccept, trackingAreaUpdateAccept, error),
+                 "tau accept parser accepts stable bytes");
+    ok &= expect(trackingAreaUpdateAccept.hasKeySetIdentifier && trackingAreaUpdateAccept.keySetIdentifier == 0x01,
+                 "tau accept parser extracts key set identifier");
+    ok &= expect(trackingAreaUpdateAccept.hasTrackingAreaCode && trackingAreaUpdateAccept.trackingAreaCode == 0x11,
+                 "tau accept parser extracts tracking area code");
+
     const std::vector<uint8_t> invalidProcedure = {
         0x0B,
         0x01, 0x03, '1', '2', '3',
@@ -159,6 +247,30 @@ int main() {
                  "short attach complete is rejected");
     ok &= expect(error.find("too short") != std::string::npos,
                  "short attach complete error is descriptive");
+
+    const std::vector<uint8_t> wrongServiceAccept = {0x42, 0x01, 0x05};
+    ok &= expect(!vepc::parseNasServiceAccept(wrongServiceAccept, serviceAccept, error),
+                 "wrong NAS message type is rejected for service accept parser");
+    ok &= expect(error.find("unexpected NAS message type") != std::string::npos,
+                 "wrong service accept NAS type error is descriptive");
+
+    const std::vector<uint8_t> shortServiceReleaseComplete = {0x4F, 0x01};
+    ok &= expect(!vepc::parseNasServiceReleaseComplete(shortServiceReleaseComplete, serviceReleaseComplete, error),
+                 "short service release complete is rejected");
+    ok &= expect(error.find("too short") != std::string::npos,
+                 "short service release complete error is descriptive");
+
+    const std::vector<uint8_t> wrongDetachAccept = {0x4F, 0x01, 0x00};
+    ok &= expect(!vepc::parseNasDetachAccept(wrongDetachAccept, detachAcceptResult, error),
+                 "wrong NAS message type is rejected for detach accept parser");
+    ok &= expect(error.find("unexpected NAS message type") != std::string::npos,
+                 "wrong detach accept NAS type error is descriptive");
+
+    const std::vector<uint8_t> shortTrackingAreaUpdateAccept = {0x49, 0x01};
+    ok &= expect(!vepc::parseNasTrackingAreaUpdateAccept(shortTrackingAreaUpdateAccept, trackingAreaUpdateAccept, error),
+                 "short tau accept is rejected");
+    ok &= expect(error.find("too short") != std::string::npos,
+                 "short tau accept error is descriptive");
 
     return ok ? 0 : 1;
 }

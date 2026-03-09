@@ -257,6 +257,61 @@
    - Ожидаемый результат:
       - demo UE flow получает минимальный завершённый attach-path до финального attached state
 
+6. Шаг 2.6: сделано
+   - Файлы: `main.cpp`, `src/s1ap_parser.h`, `src/s1ap_parser.cpp`, `test_s1ap_parser.cpp`
+   - Изменения:
+      - добавить demo parsers и builder для `Service Request (0x4C)` и `Service Accept (0x4D)`
+      - после успешного `Attach Complete` принимать `Service Request` только для уже attached UE и отвечать `Service Accept`
+      - отразить post-attach service состояние и default bearer id в `state`
+   - Проверка:
+      - `cmake --build build-win --config Release`
+      - `ctest --test-dir build-win -C Release --output-on-failure`
+      - локальный smoke test `Attach Request -> Authentication Request -> Authentication Response -> Security Mode Command -> Security Mode Complete -> Attach Accept -> Attach Complete -> Service Request -> Service Accept -> state`
+   - Ожидаемый результат:
+      - demo UE flow получает минимальный post-attach service layer поверх attached state
+
+7. Шаг 2.7: сделано
+   - Файлы: `main.cpp`, `src/s1ap_parser.h`, `src/s1ap_parser.cpp`, `test_s1ap_parser.cpp`
+   - Изменения:
+      - добавить demo parsers и builder для `Service Release Request (0x4E)` и `Service Release Complete (0x4F)`
+      - после успешного `Service Accept` принимать `Service Release Request` только для UE в `service-active` и отвечать `Service Release Complete`
+      - переводить UE из `service-active` обратно в attached-idle без потери attach/security context
+      - отразить release progress в `state`
+   - Проверка:
+      - `cmake --build build-win --config Release`
+      - `ctest --test-dir build-win -C Release --output-on-failure`
+      - локальный smoke test `Attach Request -> Authentication Request -> Authentication Response -> Security Mode Command -> Security Mode Complete -> Attach Accept -> Attach Complete -> Service Request -> Service Accept -> Service Release Request -> Service Release Complete -> state`
+   - Ожидаемый результат:
+      - demo UE flow получает минимальный возврат из active service в attached-idle state
+
+8. Шаг 2.8: сделано
+   - Файлы: `main.cpp`, `src/s1ap_parser.h`, `src/s1ap_parser.cpp`, `test_s1ap_parser.cpp`
+   - Изменения:
+      - добавить demo parsers и builder для `Detach Request (0x45)` и `Detach Accept (0x46)`
+      - принимать `Detach Request` только для UE в attached state и отвечать `Detach Accept`
+      - после detach очищать attach/security/service runtime flags и переводить UE context в `detached`
+      - отразить detach progress в `state`
+   - Проверка:
+      - `cmake --build build-win --config Release`
+      - `ctest --test-dir build-win -C Release --output-on-failure`
+      - локальный smoke test `Attach Request -> Authentication Request -> Authentication Response -> Security Mode Command -> Security Mode Complete -> Attach Accept -> Attach Complete -> Service Request -> Service Accept -> Service Release Request -> Service Release Complete -> Detach Request -> Detach Accept -> state`
+   - Ожидаемый результат:
+      - demo UE flow получает минимальный attach teardown path и возвращается в detached state
+
+9. Шаг 2.9: сделано
+   - Файлы: `main.cpp`, `src/s1ap_parser.h`, `src/s1ap_parser.cpp`, `test_s1ap_parser.cpp`
+   - Изменения:
+      - добавить demo parsers и builder для `Tracking Area Update Request (0x48)` и `Tracking Area Update Accept (0x49)`
+      - принимать `Tracking Area Update Request` только для UE в attached-idle и отвечать `Tracking Area Update Accept`
+      - хранить последний tracking area code и TAU progress в `state`
+      - сохранить возможность последующего detach после успешного TAU
+   - Проверка:
+      - `cmake --build build-win --config Release`
+      - `ctest --test-dir build-win -C Release --output-on-failure`
+      - локальный smoke test `Attach Request -> Authentication Request -> Authentication Response -> Security Mode Command -> Security Mode Complete -> Attach Accept -> Attach Complete -> Service Request -> Service Accept -> Service Release Request -> Service Release Complete -> Tracking Area Update Request -> Tracking Area Update Accept -> state`
+   - Ожидаемый результат:
+      - demo UE flow получает минимальный idle mobility transition между service release и detach
+
 ### Этап 3 — Сохранение состояния
 
 Приоритет: `P2`
