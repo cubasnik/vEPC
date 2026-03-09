@@ -29,6 +29,13 @@ add_executable(test-s1ap-parser
 
 add_test(NAME gtp-parser-smoke COMMAND test-gtp-parser)
 add_test(NAME s1ap-parser-smoke COMMAND test-s1ap-parser)
+add_test(
+    NAME runtime-state-recovery-smoke
+    COMMAND ${CMAKE_COMMAND}
+        -DVEPC_EXE=$<TARGET_FILE:vepc>
+        -DSOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -P ${CMAKE_SOURCE_DIR}/cmake/TestRuntimeStateRecovery.cmake
+)
 
 # Для Linux нужно добавить pthread
 set(THREADS_PREFER_PTHREAD_FLAG ON)

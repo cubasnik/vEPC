@@ -389,6 +389,7 @@
       - добавить дополнительную валидацию согласованности загружаемых UE/PDP context, чтобы битый snapshot отбрасывался до частичного восстановления
       - при ошибке загрузки переносить поврежденный `build/state/runtime_state.json` в quarantine-файл `runtime_state.corrupt-<timestamp>.json`
       - исключить `config/interface_admin_state.conf` из git, чтобы runtime admin-state не создавал шум в рабочем дереве
+   - добавить отдельный CTest smoke `runtime-state-recovery-smoke` для автоматической проверки quarantine recovery
    - Проверка:
       - `cmake --build build-win --config Release --target vepc`
       - `ctest --test-dir build-win -C Release --output-on-failure`
