@@ -547,6 +547,71 @@
    - Ожидаемый результат:
       - `S11` получает ещё один наблюдаемый session-management path поверх create/update/delete, в котором runtime state отражает фазу `Initiate PDP Context Activation`, а не только общий факт обновления контекста
 
+8. Шаг 5.8: сделано
+   - Файлы: `main.cpp`, `src/gtp_parser.h`, `src/gtp_parser.cpp`, `test_gtp_parser.cpp`, `test_s11_gtpc_client.cpp`, `cmake/TestS11PduNotification.cmake`, `CMakeLists.txt`
+   - Изменения:
+      - добавить минимальный `PDU Notification Request/Response` path для `S11`, который обновляет существующий `PDP context` по `TEID`, фиксирует новый `Message Type` в runtime state и возвращает стабильный demo response
+      - расширить parser-level coverage и helper `test-s11-gtpc-client` режимом `notify` с проверкой стабильного `PDU Notification Response`
+      - добавить smoke `s11-pdu-notification-smoke`, который доказывает последовательность `Create PDP -> PDU Notification -> state changed` и валидирует новые `Message Type`, `APN`, `PDP Type` и `GGSN IP`
+   - Проверка:
+      - `cmake --build build-win --config Release`
+      - `ctest --test-dir build-win -C Release -R "gtp-parser-smoke|s11-(telemetry|pdu-notification|activate-pdp|update-pdp|delete-pdp|echo)-smoke" --output-on-failure`
+      - `ctest --test-dir build-win -C Release --output-on-failure`
+   - Ожидаемый результат:
+      - `S11` получает ещё один наблюдаемый PDP-related control path поверх create/update/delete/activate, в котором runtime state отражает фазу `PDU Notification`, а не только общий факт обновления контекста
+
+9. Шаг 5.9: сделано
+   - Файлы: `main.cpp`, `src/gtp_parser.h`, `src/gtp_parser.cpp`, `test_gtp_parser.cpp`, `test_s11_gtpc_client.cpp`, `cmake/TestS11PduNotificationReject.cmake`, `CMakeLists.txt`
+   - Изменения:
+      - добавить минимальный `PDU Notification Reject Request/Response` path для `S11`, который обновляет существующий `PDP context` по `TEID`, фиксирует новый `Message Type` в runtime state и возвращает стабильный demo response
+      - расширить parser-level coverage и helper `test-s11-gtpc-client` режимом `reject` с проверкой стабильного `PDU Notification Reject Response`
+      - добавить smoke `s11-pdu-notification-reject-smoke`, который доказывает последовательность `Create PDP -> PDU Notification Reject -> state changed` и валидирует новые `Message Type`, `APN`, `PDP Type` и `GGSN IP`
+   - Проверка:
+      - `cmake --build build-win --config Release`
+      - `ctest --test-dir build-win -C Release -R "gtp-parser-smoke|s11-(telemetry|pdu-notification|pdu-notification-reject|activate-pdp|update-pdp|delete-pdp|echo)-smoke" --output-on-failure`
+      - `ctest --test-dir build-win -C Release --output-on-failure`
+   - Ожидаемый результат:
+      - `S11` получает ещё один наблюдаемый PDP-related control path поверх create/update/delete/activate/notify, в котором runtime state отражает фазу `PDU Notification Reject`, а не только общий факт обновления контекста
+
+10. Шаг 5.10: сделано
+   - Файлы: `main.cpp`, `src/gtp_parser.h`, `src/gtp_parser.cpp`, `test_gtp_parser.cpp`, `test_s11_gtpc_client.cpp`, `cmake/TestS11FailureReport.cmake`, `CMakeLists.txt`
+   - Изменения:
+      - добавить минимальный `Failure Report Request/Response` path для `S11`, который обновляет существующий `PDP context` по `TEID`, фиксирует новый `Message Type` в runtime state и возвращает стабильный demo response
+      - расширить parser-level coverage и helper `test-s11-gtpc-client` режимом `failure` с проверкой стабильного `Failure Report Response`
+      - добавить smoke `s11-failure-report-smoke`, который доказывает последовательность `Create PDP -> Failure Report -> state changed` и валидирует новые `Message Type`, `APN`, `PDP Type` и `GGSN IP`
+   - Проверка:
+      - `cmake --build build-win --config Release`
+      - `ctest --test-dir build-win -C Release -R "gtp-parser-smoke|s11-(telemetry|failure-report|pdu-notification|pdu-notification-reject|activate-pdp|update-pdp|delete-pdp|echo)-smoke" --output-on-failure`
+      - `ctest --test-dir build-win -C Release --output-on-failure`
+   - Ожидаемый результат:
+      - `S11` получает ещё один наблюдаемый control path поверх create/update/delete/activate/notify/reject, в котором runtime state отражает фазу `Failure Report`, а не только общий факт обновления контекста
+
+11. Шаг 5.11: сделано
+   - Файлы: `main.cpp`, `src/gtp_parser.h`, `src/gtp_parser.cpp`, `test_gtp_parser.cpp`, `test_s11_gtpc_client.cpp`, `cmake/TestS11NoteMsPresent.cmake`, `CMakeLists.txt`
+   - Изменения:
+      - добавить минимальный `Note MS GPRS Present Request/Response` path для `S11`, который обновляет существующий `PDP context` по `TEID`, фиксирует новый `Message Type` в runtime state и возвращает стабильный demo response
+      - расширить parser-level coverage и helper `test-s11-gtpc-client` режимом `present` с проверкой стабильного `Note MS GPRS Present Response`
+      - добавить smoke `s11-note-ms-present-smoke`, который доказывает последовательность `Create PDP -> Note MS GPRS Present -> state changed` и валидирует новые `Message Type`, `APN`, `PDP Type` и `GGSN IP`
+   - Проверка:
+      - `cmake --build build-win --config Release`
+      - `ctest --test-dir build-win -C Release -R "gtp-parser-smoke|s11-(telemetry|note-ms-present|failure-report|pdu-notification|pdu-notification-reject|activate-pdp|update-pdp|delete-pdp|echo)-smoke" --output-on-failure`
+      - `ctest --test-dir build-win -C Release --output-on-failure`
+   - Ожидаемый результат:
+      - `S11` получает ещё один наблюдаемый control path поверх create/update/delete/activate/notify/reject/failure, в котором runtime state отражает фазу `Note MS GPRS Present`, а не только общий факт обновления контекста
+
+12. Шаг 5.12: сделано
+   - Файлы: `main.cpp`, `src/gtp_parser.h`, `src/gtp_parser.cpp`, `test_gtp_parser.cpp`, `test_s11_gtpc_client.cpp`, `cmake/TestS11Identification.cmake`, `CMakeLists.txt`
+   - Изменения:
+      - добавить минимальный `Identification Request/Response` path для `S11`, который обновляет существующий `PDP context` по `TEID`, фиксирует новый `Message Type` в runtime state и возвращает стабильный demo response
+      - расширить parser-level coverage и helper `test-s11-gtpc-client` режимом `identify` с проверкой стабильного `Identification Response`
+      - добавить smoke `s11-identification-smoke`, который доказывает последовательность `Create PDP -> Identification -> state changed` и валидирует новые `Message Type`, `APN`, `PDP Type` и `GGSN IP`
+   - Проверка:
+      - `cmake --build build-win --config Release`
+      - `ctest --test-dir build-win -C Release -R "gtp-parser-smoke|s11-(telemetry|identification|note-ms-present|failure-report|pdu-notification|pdu-notification-reject|activate-pdp|update-pdp|delete-pdp|echo)-smoke" --output-on-failure`
+      - `ctest --test-dir build-win -C Release --output-on-failure`
+   - Ожидаемый результат:
+      - `S11` получает ещё один наблюдаемый control path поверх create/update/delete/activate/notify/reject/failure/present, в котором runtime state отражает фазу `Identification`, а не только общий факт обновления контекста
+
 ## Ближайший план (рекомендуемый порядок)
 
 1. Закрыть `Этап 0.6`: help по режимам, структурированные обёртки для всех runtime-команд, стабильные smoke tests.

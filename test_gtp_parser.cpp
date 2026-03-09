@@ -145,6 +145,136 @@ int main() {
     ok &= expect(vepc::buildInitiatePdpContextActivationResponse(header, 0x10004321u) == expectedActivatePdpResponse,
                  "activate pdp response bytes are stable");
 
+    const std::vector<uint8_t> pduNotificationRequest = {
+        0x32, 0x1B, 0x00, 0x23,
+        0x10, 0x00, 0x43, 0x21,
+        0x43, 0x25, 0x00, 0x00,
+        0x02, 0x21, 0x43, 0x65, 0x87, 0x09, 0x21, 0x43, 0xF5,
+        0x80, 0x00, 0x02, 0xF1, 0x44,
+        0x83, 0x00, 0x07, 0x06, 'n', 'o', 't', 'i', 'f', 'y',
+        0x85, 0x00, 0x04, 0x0A, 0x17, 0x2A, 0x58,
+    };
+
+    ok &= expect(vepc::parseGtpV1Header(pduNotificationRequest, header, error), "pdu notification request header parses");
+    ok &= expect(vepc::parsePduNotificationRequest(pduNotificationRequest, header, request, error), "pdu notification request body parses");
+    ok &= expect(request.hasImsi && request.imsi == "123456789012345", "pdu notification parser extracts IMSI");
+    ok &= expect(request.hasApn && request.apn == "notify", "pdu notification parser extracts APN");
+    ok &= expect(request.hasPdpType && request.pdpType == 0x44, "pdu notification parser extracts PDP type");
+    ok &= expect(request.hasGgsnIp && request.ggsnIp == "10.23.42.88", "pdu notification parser extracts GGSN IP");
+
+    const std::vector<uint8_t> expectedPduNotificationResponse = {
+        0x32, 0x1C, 0x00, 0x06,
+        0x10, 0x00, 0x43, 0x21,
+        0x43, 0x25, 0x00, 0x00,
+        0x01, 0x80,
+    };
+    ok &= expect(vepc::buildPduNotificationResponse(header, 0x10004321u) == expectedPduNotificationResponse,
+                 "pdu notification response bytes are stable");
+
+    const std::vector<uint8_t> pduNotificationRejectRequest = {
+        0x32, 0x1D, 0x00, 0x23,
+        0x10, 0x00, 0x43, 0x21,
+        0x43, 0x26, 0x00, 0x00,
+        0x02, 0x21, 0x43, 0x65, 0x87, 0x09, 0x21, 0x43, 0xF5,
+        0x80, 0x00, 0x02, 0xF1, 0x45,
+        0x83, 0x00, 0x07, 0x06, 'r', 'e', 'j', 'e', 'c', 't',
+        0x85, 0x00, 0x04, 0x0A, 0x17, 0x2A, 0x59,
+    };
+
+    ok &= expect(vepc::parseGtpV1Header(pduNotificationRejectRequest, header, error), "pdu notification reject request header parses");
+    ok &= expect(vepc::parsePduNotificationRejectRequest(pduNotificationRejectRequest, header, request, error), "pdu notification reject request body parses");
+    ok &= expect(request.hasImsi && request.imsi == "123456789012345", "pdu notification reject parser extracts IMSI");
+    ok &= expect(request.hasApn && request.apn == "reject", "pdu notification reject parser extracts APN");
+    ok &= expect(request.hasPdpType && request.pdpType == 0x45, "pdu notification reject parser extracts PDP type");
+    ok &= expect(request.hasGgsnIp && request.ggsnIp == "10.23.42.89", "pdu notification reject parser extracts GGSN IP");
+
+    const std::vector<uint8_t> expectedPduNotificationRejectResponse = {
+        0x32, 0x1E, 0x00, 0x06,
+        0x10, 0x00, 0x43, 0x21,
+        0x43, 0x26, 0x00, 0x00,
+        0x01, 0x80,
+    };
+    ok &= expect(vepc::buildPduNotificationRejectResponse(header, 0x10004321u) == expectedPduNotificationRejectResponse,
+                 "pdu notification reject response bytes are stable");
+
+    const std::vector<uint8_t> failureReportRequest = {
+        0x32, 0x22, 0x00, 0x22,
+        0x10, 0x00, 0x43, 0x21,
+        0x43, 0x27, 0x00, 0x00,
+        0x02, 0x21, 0x43, 0x65, 0x87, 0x09, 0x21, 0x43, 0xF5,
+        0x80, 0x00, 0x02, 0xF1, 0x46,
+        0x83, 0x00, 0x06, 0x05, 'a', 'l', 'a', 'r', 'm',
+        0x85, 0x00, 0x04, 0x0A, 0x17, 0x2A, 0x5A,
+    };
+
+    ok &= expect(vepc::parseGtpV1Header(failureReportRequest, header, error), "failure report request header parses");
+    ok &= expect(vepc::parseFailureReportRequest(failureReportRequest, header, request, error), "failure report request body parses");
+    ok &= expect(request.hasImsi && request.imsi == "123456789012345", "failure report parser extracts IMSI");
+    ok &= expect(request.hasApn && request.apn == "alarm", "failure report parser extracts APN");
+    ok &= expect(request.hasPdpType && request.pdpType == 0x46, "failure report parser extracts PDP type");
+    ok &= expect(request.hasGgsnIp && request.ggsnIp == "10.23.42.90", "failure report parser extracts GGSN IP");
+
+    const std::vector<uint8_t> expectedFailureReportResponse = {
+        0x32, 0x23, 0x00, 0x06,
+        0x10, 0x00, 0x43, 0x21,
+        0x43, 0x27, 0x00, 0x00,
+        0x01, 0x80,
+    };
+    ok &= expect(vepc::buildFailureReportResponse(header, 0x10004321u) == expectedFailureReportResponse,
+                 "failure report response bytes are stable");
+
+    const std::vector<uint8_t> noteMsGprsPresentRequest = {
+        0x32, 0x24, 0x00, 0x23,
+        0x10, 0x00, 0x43, 0x21,
+        0x43, 0x28, 0x00, 0x00,
+        0x02, 0x21, 0x43, 0x65, 0x87, 0x09, 0x21, 0x43, 0xF5,
+        0x80, 0x00, 0x02, 0xF1, 0x47,
+        0x83, 0x00, 0x07, 0x06, 'p', 'r', 'e', 's', 'e', 'n',
+        0x85, 0x00, 0x04, 0x0A, 0x17, 0x2A, 0x5B,
+    };
+
+    ok &= expect(vepc::parseGtpV1Header(noteMsGprsPresentRequest, header, error), "note ms gprs present request header parses");
+    ok &= expect(vepc::parseNoteMsGprsPresentRequest(noteMsGprsPresentRequest, header, request, error), "note ms gprs present request body parses");
+    ok &= expect(request.hasImsi && request.imsi == "123456789012345", "note ms gprs present parser extracts IMSI");
+    ok &= expect(request.hasApn && request.apn == "presen", "note ms gprs present parser extracts APN");
+    ok &= expect(request.hasPdpType && request.pdpType == 0x47, "note ms gprs present parser extracts PDP type");
+    ok &= expect(request.hasGgsnIp && request.ggsnIp == "10.23.42.91", "note ms gprs present parser extracts GGSN IP");
+
+    const std::vector<uint8_t> expectedNoteMsGprsPresentResponse = {
+        0x32, 0x25, 0x00, 0x06,
+        0x10, 0x00, 0x43, 0x21,
+        0x43, 0x28, 0x00, 0x00,
+        0x01, 0x80,
+    };
+    ok &= expect(vepc::buildNoteMsGprsPresentResponse(header, 0x10004321u) == expectedNoteMsGprsPresentResponse,
+                 "note ms gprs present response bytes are stable");
+
+    const std::vector<uint8_t> identificationRequest = {
+        0x32, 0x30, 0x00, 0x22,
+        0x10, 0x00, 0x43, 0x21,
+        0x43, 0x29, 0x00, 0x00,
+        0x02, 0x21, 0x43, 0x65, 0x87, 0x09, 0x21, 0x43, 0xF5,
+        0x80, 0x00, 0x02, 0xF1, 0x48,
+        0x83, 0x00, 0x06, 0x05, 'i', 'd', 'e', 'n', 't',
+        0x85, 0x00, 0x04, 0x0A, 0x17, 0x2A, 0x5C,
+    };
+
+    ok &= expect(vepc::parseGtpV1Header(identificationRequest, header, error), "identification request header parses");
+    ok &= expect(vepc::parseIdentificationRequest(identificationRequest, header, request, error), "identification request body parses");
+    ok &= expect(request.hasImsi && request.imsi == "123456789012345", "identification parser extracts IMSI");
+    ok &= expect(request.hasApn && request.apn == "ident", "identification parser extracts APN");
+    ok &= expect(request.hasPdpType && request.pdpType == 0x48, "identification parser extracts PDP type");
+    ok &= expect(request.hasGgsnIp && request.ggsnIp == "10.23.42.92", "identification parser extracts GGSN IP");
+
+    const std::vector<uint8_t> expectedIdentificationResponse = {
+        0x32, 0x31, 0x00, 0x06,
+        0x10, 0x00, 0x43, 0x21,
+        0x43, 0x29, 0x00, 0x00,
+        0x01, 0x80,
+    };
+    ok &= expect(vepc::buildIdentificationResponse(header, 0x10004321u) == expectedIdentificationResponse,
+                 "identification response bytes are stable");
+
     const std::vector<uint8_t> deletePdpRequest = {
         0x32, 0x14, 0x00, 0x04,
         0x10, 0x00, 0x43, 0x21,

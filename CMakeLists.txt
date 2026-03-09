@@ -98,6 +98,51 @@ add_test(
         -P ${CMAKE_SOURCE_DIR}/cmake/TestS11ActivatePdp.cmake
 )
 add_test(
+    NAME s11-pdu-notification-smoke
+    COMMAND ${CMAKE_COMMAND}
+        -DVEPC_EXE=$<TARGET_FILE:vepc>
+        -DRUNTIME_CLI_EXE=$<TARGET_FILE:test-runtime-cli>
+        -DS11_GTPC_CLIENT_EXE=$<TARGET_FILE:test-s11-gtpc-client>
+        -DSOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -P ${CMAKE_SOURCE_DIR}/cmake/TestS11PduNotification.cmake
+)
+add_test(
+    NAME s11-pdu-notification-reject-smoke
+    COMMAND ${CMAKE_COMMAND}
+        -DVEPC_EXE=$<TARGET_FILE:vepc>
+        -DRUNTIME_CLI_EXE=$<TARGET_FILE:test-runtime-cli>
+        -DS11_GTPC_CLIENT_EXE=$<TARGET_FILE:test-s11-gtpc-client>
+        -DSOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -P ${CMAKE_SOURCE_DIR}/cmake/TestS11PduNotificationReject.cmake
+)
+add_test(
+    NAME s11-failure-report-smoke
+    COMMAND ${CMAKE_COMMAND}
+        -DVEPC_EXE=$<TARGET_FILE:vepc>
+        -DRUNTIME_CLI_EXE=$<TARGET_FILE:test-runtime-cli>
+        -DS11_GTPC_CLIENT_EXE=$<TARGET_FILE:test-s11-gtpc-client>
+        -DSOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -P ${CMAKE_SOURCE_DIR}/cmake/TestS11FailureReport.cmake
+)
+add_test(
+    NAME s11-note-ms-present-smoke
+    COMMAND ${CMAKE_COMMAND}
+        -DVEPC_EXE=$<TARGET_FILE:vepc>
+        -DRUNTIME_CLI_EXE=$<TARGET_FILE:test-runtime-cli>
+        -DS11_GTPC_CLIENT_EXE=$<TARGET_FILE:test-s11-gtpc-client>
+        -DSOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -P ${CMAKE_SOURCE_DIR}/cmake/TestS11NoteMsPresent.cmake
+)
+add_test(
+    NAME s11-identification-smoke
+    COMMAND ${CMAKE_COMMAND}
+        -DVEPC_EXE=$<TARGET_FILE:vepc>
+        -DRUNTIME_CLI_EXE=$<TARGET_FILE:test-runtime-cli>
+        -DS11_GTPC_CLIENT_EXE=$<TARGET_FILE:test-s11-gtpc-client>
+        -DSOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -P ${CMAKE_SOURCE_DIR}/cmake/TestS11Identification.cmake
+)
+add_test(
     NAME s11-echo-smoke
     COMMAND ${CMAKE_COMMAND}
         -DVEPC_EXE=$<TARGET_FILE:vepc>

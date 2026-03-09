@@ -2833,6 +2833,281 @@ bool VNodeController::handleRealGtpMessage(NativeSocket socketHandle,
         return sendGtpResponse(socketHandle, peerAddr, response, peerIp, "Initiate PDP Context Activation response", header.teid, header.sequence);
     }
 
+    if (header.messageType == 0x1B) {
+        vepc::CreatePdpRequestInfo request;
+        std::string requestError;
+        if (!vepc::parsePduNotificationRequest(packet, header, request, requestError)) {
+            log("GTP", "Rejected PDU Notification request from " + peerIp + ": " + requestError);
+            return true;
+        }
+
+        PDPContext context;
+        const bool found = tryGetPdpContext(header.teid, context);
+        if (found) {
+            context.sequence = header.sequence;
+            context.last_message_type = header.messageType;
+            context.peer_ip = peerIp;
+            context.updated_at = std::time(nullptr);
+            if (request.hasImsi) {
+                context.imsi = request.imsi;
+            }
+            if (request.hasApn) {
+                context.apn = request.apn;
+            }
+            if (request.hasGgsnIp) {
+                context.ggsn_ip = request.ggsnIp;
+            }
+            if (request.hasPdpType) {
+                context.pdp_type = request.pdpType;
+                context.has_pdp_type = true;
+            }
+            upsertPdpContext(context);
+        }
+
+        std::ostringstream parsedRequestLog;
+        parsedRequestLog << "PDU Notification request parsed from " << peerIp
+                         << ": teid=0x" << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << header.teid
+                         << std::dec << std::setfill(' ')
+                         << ", notified=" << (found ? "yes" : "no");
+        if (request.hasApn) {
+            parsedRequestLog << ", apn=" << request.apn;
+        }
+        if (request.hasPdpType) {
+            PDPContext formatted;
+            formatted.pdp_type = request.pdpType;
+            formatted.has_pdp_type = true;
+            parsedRequestLog << ", pdp_type=" << formatPdpTypeValue(formatted);
+        }
+        if (request.hasGgsnIp) {
+            parsedRequestLog << ", ggsn_ip=" << request.ggsnIp;
+        }
+        log("GTP", parsedRequestLog.str());
+
+        const uint8_t cause = found ? 0x80 : 0xC0;
+        const std::vector<uint8_t> response = vepc::buildPduNotificationResponse(header, header.teid, cause);
+        return sendGtpResponse(socketHandle, peerAddr, response, peerIp, "PDU Notification response", header.teid, header.sequence);
+    }
+
+    if (header.messageType == 0x1D) {
+        vepc::CreatePdpRequestInfo request;
+        std::string requestError;
+        if (!vepc::parsePduNotificationRejectRequest(packet, header, request, requestError)) {
+            log("GTP", "Rejected PDU Notification Reject request from " + peerIp + ": " + requestError);
+            return true;
+        }
+
+        PDPContext context;
+        const bool found = tryGetPdpContext(header.teid, context);
+        if (found) {
+            context.sequence = header.sequence;
+            context.last_message_type = header.messageType;
+            context.peer_ip = peerIp;
+            context.updated_at = std::time(nullptr);
+            if (request.hasImsi) {
+                context.imsi = request.imsi;
+            }
+            if (request.hasApn) {
+                context.apn = request.apn;
+            }
+            if (request.hasGgsnIp) {
+                context.ggsn_ip = request.ggsnIp;
+            }
+            if (request.hasPdpType) {
+                context.pdp_type = request.pdpType;
+                context.has_pdp_type = true;
+            }
+            upsertPdpContext(context);
+        }
+
+        std::ostringstream parsedRequestLog;
+        parsedRequestLog << "PDU Notification Reject request parsed from " << peerIp
+                         << ": teid=0x" << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << header.teid
+                         << std::dec << std::setfill(' ')
+                         << ", rejected=" << (found ? "yes" : "no");
+        if (request.hasApn) {
+            parsedRequestLog << ", apn=" << request.apn;
+        }
+        if (request.hasPdpType) {
+            PDPContext formatted;
+            formatted.pdp_type = request.pdpType;
+            formatted.has_pdp_type = true;
+            parsedRequestLog << ", pdp_type=" << formatPdpTypeValue(formatted);
+        }
+        if (request.hasGgsnIp) {
+            parsedRequestLog << ", ggsn_ip=" << request.ggsnIp;
+        }
+        log("GTP", parsedRequestLog.str());
+
+        const uint8_t cause = found ? 0x80 : 0xC0;
+        const std::vector<uint8_t> response = vepc::buildPduNotificationRejectResponse(header, header.teid, cause);
+        return sendGtpResponse(socketHandle, peerAddr, response, peerIp, "PDU Notification Reject response", header.teid, header.sequence);
+    }
+
+    if (header.messageType == 0x22) {
+        vepc::CreatePdpRequestInfo request;
+        std::string requestError;
+        if (!vepc::parseFailureReportRequest(packet, header, request, requestError)) {
+            log("GTP", "Rejected Failure Report request from " + peerIp + ": " + requestError);
+            return true;
+        }
+
+        PDPContext context;
+        const bool found = tryGetPdpContext(header.teid, context);
+        if (found) {
+            context.sequence = header.sequence;
+            context.last_message_type = header.messageType;
+            context.peer_ip = peerIp;
+            context.updated_at = std::time(nullptr);
+            if (request.hasImsi) {
+                context.imsi = request.imsi;
+            }
+            if (request.hasApn) {
+                context.apn = request.apn;
+            }
+            if (request.hasGgsnIp) {
+                context.ggsn_ip = request.ggsnIp;
+            }
+            if (request.hasPdpType) {
+                context.pdp_type = request.pdpType;
+                context.has_pdp_type = true;
+            }
+            upsertPdpContext(context);
+        }
+
+        std::ostringstream parsedRequestLog;
+        parsedRequestLog << "Failure Report request parsed from " << peerIp
+                         << ": teid=0x" << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << header.teid
+                         << std::dec << std::setfill(' ')
+                         << ", reported=" << (found ? "yes" : "no");
+        if (request.hasApn) {
+            parsedRequestLog << ", apn=" << request.apn;
+        }
+        if (request.hasPdpType) {
+            PDPContext formatted;
+            formatted.pdp_type = request.pdpType;
+            formatted.has_pdp_type = true;
+            parsedRequestLog << ", pdp_type=" << formatPdpTypeValue(formatted);
+        }
+        if (request.hasGgsnIp) {
+            parsedRequestLog << ", ggsn_ip=" << request.ggsnIp;
+        }
+        log("GTP", parsedRequestLog.str());
+
+        const uint8_t cause = found ? 0x80 : 0xC0;
+        const std::vector<uint8_t> response = vepc::buildFailureReportResponse(header, header.teid, cause);
+        return sendGtpResponse(socketHandle, peerAddr, response, peerIp, "Failure Report response", header.teid, header.sequence);
+    }
+
+    if (header.messageType == 0x24) {
+        vepc::CreatePdpRequestInfo request;
+        std::string requestError;
+        if (!vepc::parseNoteMsGprsPresentRequest(packet, header, request, requestError)) {
+            log("GTP", "Rejected Note MS GPRS Present request from " + peerIp + ": " + requestError);
+            return true;
+        }
+
+        PDPContext context;
+        const bool found = tryGetPdpContext(header.teid, context);
+        if (found) {
+            context.sequence = header.sequence;
+            context.last_message_type = header.messageType;
+            context.peer_ip = peerIp;
+            context.updated_at = std::time(nullptr);
+            if (request.hasImsi) {
+                context.imsi = request.imsi;
+            }
+            if (request.hasApn) {
+                context.apn = request.apn;
+            }
+            if (request.hasGgsnIp) {
+                context.ggsn_ip = request.ggsnIp;
+            }
+            if (request.hasPdpType) {
+                context.pdp_type = request.pdpType;
+                context.has_pdp_type = true;
+            }
+            upsertPdpContext(context);
+        }
+
+        std::ostringstream parsedRequestLog;
+        parsedRequestLog << "Note MS GPRS Present request parsed from " << peerIp
+                         << ": teid=0x" << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << header.teid
+                         << std::dec << std::setfill(' ')
+                         << ", present=" << (found ? "yes" : "no");
+        if (request.hasApn) {
+            parsedRequestLog << ", apn=" << request.apn;
+        }
+        if (request.hasPdpType) {
+            PDPContext formatted;
+            formatted.pdp_type = request.pdpType;
+            formatted.has_pdp_type = true;
+            parsedRequestLog << ", pdp_type=" << formatPdpTypeValue(formatted);
+        }
+        if (request.hasGgsnIp) {
+            parsedRequestLog << ", ggsn_ip=" << request.ggsnIp;
+        }
+        log("GTP", parsedRequestLog.str());
+
+        const uint8_t cause = found ? 0x80 : 0xC0;
+        const std::vector<uint8_t> response = vepc::buildNoteMsGprsPresentResponse(header, header.teid, cause);
+        return sendGtpResponse(socketHandle, peerAddr, response, peerIp, "Note MS GPRS Present response", header.teid, header.sequence);
+    }
+
+    if (header.messageType == 0x30) {
+        vepc::CreatePdpRequestInfo request;
+        std::string requestError;
+        if (!vepc::parseIdentificationRequest(packet, header, request, requestError)) {
+            log("GTP", "Rejected Identification request from " + peerIp + ": " + requestError);
+            return true;
+        }
+
+        PDPContext context;
+        const bool found = tryGetPdpContext(header.teid, context);
+        if (found) {
+            context.sequence = header.sequence;
+            context.last_message_type = header.messageType;
+            context.peer_ip = peerIp;
+            context.updated_at = std::time(nullptr);
+            if (request.hasImsi) {
+                context.imsi = request.imsi;
+            }
+            if (request.hasApn) {
+                context.apn = request.apn;
+            }
+            if (request.hasGgsnIp) {
+                context.ggsn_ip = request.ggsnIp;
+            }
+            if (request.hasPdpType) {
+                context.pdp_type = request.pdpType;
+                context.has_pdp_type = true;
+            }
+            upsertPdpContext(context);
+        }
+
+        std::ostringstream parsedRequestLog;
+        parsedRequestLog << "Identification request parsed from " << peerIp
+                         << ": teid=0x" << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << header.teid
+                         << std::dec << std::setfill(' ')
+                         << ", identified=" << (found ? "yes" : "no");
+        if (request.hasApn) {
+            parsedRequestLog << ", apn=" << request.apn;
+        }
+        if (request.hasPdpType) {
+            PDPContext formatted;
+            formatted.pdp_type = request.pdpType;
+            formatted.has_pdp_type = true;
+            parsedRequestLog << ", pdp_type=" << formatPdpTypeValue(formatted);
+        }
+        if (request.hasGgsnIp) {
+            parsedRequestLog << ", ggsn_ip=" << request.ggsnIp;
+        }
+        log("GTP", parsedRequestLog.str());
+
+        const uint8_t cause = found ? 0x80 : 0xC0;
+        const std::vector<uint8_t> response = vepc::buildIdentificationResponse(header, header.teid, cause);
+        return sendGtpResponse(socketHandle, peerAddr, response, peerIp, "Identification response", header.teid, header.sequence);
+    }
+
     if (header.messageType == 0x14) {
         PDPContext removedContext;
         const bool removed = removePdpContext(header.teid, &removedContext);

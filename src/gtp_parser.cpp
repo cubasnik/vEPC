@@ -218,6 +218,26 @@ std::string formatGtpMessageType(uint8_t messageType) {
         return "Initiate PDP Context Activation Request (0x16)";
     case 0x17:
         return "Initiate PDP Context Activation Response (0x17)";
+    case 0x1B:
+        return "PDU Notification Request (0x1B)";
+    case 0x1C:
+        return "PDU Notification Response (0x1C)";
+    case 0x1D:
+        return "PDU Notification Reject Request (0x1D)";
+    case 0x1E:
+        return "PDU Notification Reject Response (0x1E)";
+    case 0x22:
+        return "Failure Report Request (0x22)";
+    case 0x23:
+        return "Failure Report Response (0x23)";
+    case 0x24:
+        return "Note MS GPRS Present Request (0x24)";
+    case 0x25:
+        return "Note MS GPRS Present Response (0x25)";
+    case 0x30:
+        return "Identification Request (0x30)";
+    case 0x31:
+        return "Identification Response (0x31)";
     default: {
         std::ostringstream oss;
         oss << "0x" << std::uppercase << std::hex << std::setw(2) << std::setfill('0')
@@ -318,6 +338,66 @@ bool parseInitiatePdpContextActivationRequest(const std::vector<uint8_t>& packet
                                       header,
                                       0x16,
                                       "Initiate PDP Context Activation Request",
+                                      request,
+                                      error);
+}
+
+bool parsePduNotificationRequest(const std::vector<uint8_t>& packet,
+                                 const GtpV1Header& header,
+                                 CreatePdpRequestInfo& request,
+                                 std::string& error) {
+    return parseDemoPdpContextRequest(packet,
+                                      header,
+                                      0x1B,
+                                      "PDU Notification Request",
+                                      request,
+                                      error);
+}
+
+bool parsePduNotificationRejectRequest(const std::vector<uint8_t>& packet,
+                                       const GtpV1Header& header,
+                                       CreatePdpRequestInfo& request,
+                                       std::string& error) {
+    return parseDemoPdpContextRequest(packet,
+                                      header,
+                                      0x1D,
+                                      "PDU Notification Reject Request",
+                                      request,
+                                      error);
+}
+
+bool parseFailureReportRequest(const std::vector<uint8_t>& packet,
+                               const GtpV1Header& header,
+                               CreatePdpRequestInfo& request,
+                               std::string& error) {
+    return parseDemoPdpContextRequest(packet,
+                                      header,
+                                      0x22,
+                                      "Failure Report Request",
+                                      request,
+                                      error);
+}
+
+bool parseNoteMsGprsPresentRequest(const std::vector<uint8_t>& packet,
+                                   const GtpV1Header& header,
+                                   CreatePdpRequestInfo& request,
+                                   std::string& error) {
+    return parseDemoPdpContextRequest(packet,
+                                      header,
+                                      0x24,
+                                      "Note MS GPRS Present Request",
+                                      request,
+                                      error);
+}
+
+bool parseIdentificationRequest(const std::vector<uint8_t>& packet,
+                                const GtpV1Header& header,
+                                CreatePdpRequestInfo& request,
+                                std::string& error) {
+    return parseDemoPdpContextRequest(packet,
+                                      header,
+                                      0x30,
+                                      "Identification Request",
                                       request,
                                       error);
 }
@@ -440,6 +520,141 @@ std::vector<uint8_t> buildInitiatePdpContextActivationResponse(const GtpV1Header
 
     response.push_back(buildResponseFlags(requestHeader));
     response.push_back(0x17);
+    response.push_back(static_cast<uint8_t>((payloadLength >> 8) & 0xFF));
+    response.push_back(static_cast<uint8_t>(payloadLength & 0xFF));
+    response.push_back(static_cast<uint8_t>((responseTeid >> 24) & 0xFF));
+    response.push_back(static_cast<uint8_t>((responseTeid >> 16) & 0xFF));
+    response.push_back(static_cast<uint8_t>((responseTeid >> 8) & 0xFF));
+    response.push_back(static_cast<uint8_t>(responseTeid & 0xFF));
+
+    appendOptionalFields(response, requestHeader);
+
+    response.push_back(0x01);
+    response.push_back(cause);
+    return response;
+}
+
+std::vector<uint8_t> buildPduNotificationResponse(const GtpV1Header& requestHeader,
+                                                  uint32_t responseTeid,
+                                                  uint8_t cause) {
+    const bool hasOptionalFields = requestHeader.hasExtensionHeader
+        || requestHeader.hasSequenceNumber
+        || requestHeader.hasNpduNumber;
+    const uint16_t payloadLength = static_cast<uint16_t>((hasOptionalFields ? 4 : 0) + 2);
+
+    std::vector<uint8_t> response;
+    response.reserve(8 + (hasOptionalFields ? 4 : 0) + 2);
+
+    response.push_back(buildResponseFlags(requestHeader));
+    response.push_back(0x1C);
+    response.push_back(static_cast<uint8_t>((payloadLength >> 8) & 0xFF));
+    response.push_back(static_cast<uint8_t>(payloadLength & 0xFF));
+    response.push_back(static_cast<uint8_t>((responseTeid >> 24) & 0xFF));
+    response.push_back(static_cast<uint8_t>((responseTeid >> 16) & 0xFF));
+    response.push_back(static_cast<uint8_t>((responseTeid >> 8) & 0xFF));
+    response.push_back(static_cast<uint8_t>(responseTeid & 0xFF));
+
+    appendOptionalFields(response, requestHeader);
+
+    response.push_back(0x01);
+    response.push_back(cause);
+    return response;
+}
+
+std::vector<uint8_t> buildPduNotificationRejectResponse(const GtpV1Header& requestHeader,
+                                                        uint32_t responseTeid,
+                                                        uint8_t cause) {
+    const bool hasOptionalFields = requestHeader.hasExtensionHeader
+        || requestHeader.hasSequenceNumber
+        || requestHeader.hasNpduNumber;
+    const uint16_t payloadLength = static_cast<uint16_t>((hasOptionalFields ? 4 : 0) + 2);
+
+    std::vector<uint8_t> response;
+    response.reserve(8 + (hasOptionalFields ? 4 : 0) + 2);
+
+    response.push_back(buildResponseFlags(requestHeader));
+    response.push_back(0x1E);
+    response.push_back(static_cast<uint8_t>((payloadLength >> 8) & 0xFF));
+    response.push_back(static_cast<uint8_t>(payloadLength & 0xFF));
+    response.push_back(static_cast<uint8_t>((responseTeid >> 24) & 0xFF));
+    response.push_back(static_cast<uint8_t>((responseTeid >> 16) & 0xFF));
+    response.push_back(static_cast<uint8_t>((responseTeid >> 8) & 0xFF));
+    response.push_back(static_cast<uint8_t>(responseTeid & 0xFF));
+
+    appendOptionalFields(response, requestHeader);
+
+    response.push_back(0x01);
+    response.push_back(cause);
+    return response;
+}
+
+std::vector<uint8_t> buildFailureReportResponse(const GtpV1Header& requestHeader,
+                                                uint32_t responseTeid,
+                                                uint8_t cause) {
+    const bool hasOptionalFields = requestHeader.hasExtensionHeader
+        || requestHeader.hasSequenceNumber
+        || requestHeader.hasNpduNumber;
+    const uint16_t payloadLength = static_cast<uint16_t>((hasOptionalFields ? 4 : 0) + 2);
+
+    std::vector<uint8_t> response;
+    response.reserve(8 + (hasOptionalFields ? 4 : 0) + 2);
+
+    response.push_back(buildResponseFlags(requestHeader));
+    response.push_back(0x23);
+    response.push_back(static_cast<uint8_t>((payloadLength >> 8) & 0xFF));
+    response.push_back(static_cast<uint8_t>(payloadLength & 0xFF));
+    response.push_back(static_cast<uint8_t>((responseTeid >> 24) & 0xFF));
+    response.push_back(static_cast<uint8_t>((responseTeid >> 16) & 0xFF));
+    response.push_back(static_cast<uint8_t>((responseTeid >> 8) & 0xFF));
+    response.push_back(static_cast<uint8_t>(responseTeid & 0xFF));
+
+    appendOptionalFields(response, requestHeader);
+
+    response.push_back(0x01);
+    response.push_back(cause);
+    return response;
+}
+
+std::vector<uint8_t> buildNoteMsGprsPresentResponse(const GtpV1Header& requestHeader,
+                                                    uint32_t responseTeid,
+                                                    uint8_t cause) {
+    const bool hasOptionalFields = requestHeader.hasExtensionHeader
+        || requestHeader.hasSequenceNumber
+        || requestHeader.hasNpduNumber;
+    const uint16_t payloadLength = static_cast<uint16_t>((hasOptionalFields ? 4 : 0) + 2);
+
+    std::vector<uint8_t> response;
+    response.reserve(8 + (hasOptionalFields ? 4 : 0) + 2);
+
+    response.push_back(buildResponseFlags(requestHeader));
+    response.push_back(0x25);
+    response.push_back(static_cast<uint8_t>((payloadLength >> 8) & 0xFF));
+    response.push_back(static_cast<uint8_t>(payloadLength & 0xFF));
+    response.push_back(static_cast<uint8_t>((responseTeid >> 24) & 0xFF));
+    response.push_back(static_cast<uint8_t>((responseTeid >> 16) & 0xFF));
+    response.push_back(static_cast<uint8_t>((responseTeid >> 8) & 0xFF));
+    response.push_back(static_cast<uint8_t>(responseTeid & 0xFF));
+
+    appendOptionalFields(response, requestHeader);
+
+    response.push_back(0x01);
+    response.push_back(cause);
+    return response;
+}
+
+std::vector<uint8_t> buildIdentificationResponse(const GtpV1Header& requestHeader,
+                                                 uint32_t responseTeid,
+                                                 uint8_t cause) {
+    const bool hasOptionalFields = requestHeader.hasExtensionHeader
+        || requestHeader.hasSequenceNumber
+        || requestHeader.hasNpduNumber;
+    const uint16_t payloadLength = static_cast<uint16_t>((hasOptionalFields ? 4 : 0) + 2);
+
+    std::vector<uint8_t> response;
+    response.reserve(8 + (hasOptionalFields ? 4 : 0) + 2);
+
+    response.push_back(buildResponseFlags(requestHeader));
+    response.push_back(0x31);
     response.push_back(static_cast<uint8_t>((payloadLength >> 8) & 0xFF));
     response.push_back(static_cast<uint8_t>(payloadLength & 0xFF));
     response.push_back(static_cast<uint8_t>((responseTeid >> 24) & 0xFF));

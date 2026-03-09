@@ -48,6 +48,26 @@ bool parseInitiatePdpContextActivationRequest(const std::vector<uint8_t>& packet
                                               const GtpV1Header& header,
                                               CreatePdpRequestInfo& request,
                                               std::string& error);
+bool parsePduNotificationRequest(const std::vector<uint8_t>& packet,
+                                 const GtpV1Header& header,
+                                 CreatePdpRequestInfo& request,
+                                 std::string& error);
+bool parsePduNotificationRejectRequest(const std::vector<uint8_t>& packet,
+                                       const GtpV1Header& header,
+                                       CreatePdpRequestInfo& request,
+                                       std::string& error);
+bool parseFailureReportRequest(const std::vector<uint8_t>& packet,
+                               const GtpV1Header& header,
+                               CreatePdpRequestInfo& request,
+                               std::string& error);
+bool parseNoteMsGprsPresentRequest(const std::vector<uint8_t>& packet,
+                                   const GtpV1Header& header,
+                                   CreatePdpRequestInfo& request,
+                                   std::string& error);
+bool parseIdentificationRequest(const std::vector<uint8_t>& packet,
+                                const GtpV1Header& header,
+                                CreatePdpRequestInfo& request,
+                                std::string& error);
 std::string formatGtpMessageType(uint8_t messageType);
 std::vector<uint8_t> buildEchoResponse(const GtpV1Header& requestHeader, uint8_t recoveryRestartCounter = 0);
 std::vector<uint8_t> buildCreatePdpContextResponse(const GtpV1Header& requestHeader,
@@ -61,5 +81,20 @@ std::vector<uint8_t> buildDeletePdpContextResponse(const GtpV1Header& requestHea
 std::vector<uint8_t> buildInitiatePdpContextActivationResponse(const GtpV1Header& requestHeader,
                                                                uint32_t responseTeid,
                                                                uint8_t cause = 0x80);
+std::vector<uint8_t> buildPduNotificationResponse(const GtpV1Header& requestHeader,
+                                                  uint32_t responseTeid,
+                                                  uint8_t cause = 0x80);
+std::vector<uint8_t> buildPduNotificationRejectResponse(const GtpV1Header& requestHeader,
+                                                        uint32_t responseTeid,
+                                                        uint8_t cause = 0x80);
+std::vector<uint8_t> buildFailureReportResponse(const GtpV1Header& requestHeader,
+                                                uint32_t responseTeid,
+                                                uint8_t cause = 0x80);
+std::vector<uint8_t> buildNoteMsGprsPresentResponse(const GtpV1Header& requestHeader,
+                                                    uint32_t responseTeid,
+                                                    uint8_t cause = 0x80);
+std::vector<uint8_t> buildIdentificationResponse(const GtpV1Header& requestHeader,
+                                                 uint32_t responseTeid,
+                                                 uint8_t cause = 0x80);
 
 }  // namespace vepc
