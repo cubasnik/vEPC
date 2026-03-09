@@ -137,5 +137,28 @@ int main() {
     ok &= expect(vepc::formatDiameterCommand(header.commandCode, header.request) == "Device-Watchdog-Answer (DWA)",
                  "diameter formatter recognizes DWA");
 
+    // DPR builder / parser tests
+    const std::vector<uint8_t> dpr = vepc::buildDisconnectPeerRequest("mme.vepc.local", 0);
+    ok &= expect(vepc::parseDiameterHeader(dpr, header, error), "diameter dpr header parses");
+    ok &= expect(header.commandCode == 282, "diameter dpr has command 282");
+    ok &= expect(header.request, "diameter dpr has request flag");
+    ok &= expect(vepc::formatDiameterCommand(header.commandCode, header.request) == "Disconnect-Peer-Request (DPR)",
+                 "diameter formatter recognizes DPR");
+
+    vepc::DiameterDisconnectPeerRequest dprRequest;
+    ok &= expect(vepc::parseDisconnectPeerRequest(dpr, dprRequest, error), "diameter dpr avps parse");
+    ok &= expect(dprRequest.hasOriginHost && dprRequest.originHost == "mme.vepc.local",
+                 "diameter dpr origin-host parses");
+    ok &= expect(dprRequest.hasDisconnectCause && dprRequest.disconnectCause == 0,
+                 "diameter dpr disconnect-cause parses");
+
+    // DPA builder test
+    const std::vector<uint8_t> dpa = vepc::buildDisconnectPeerAnswer(header, "hss.vepc.local");
+    ok &= expect(vepc::parseDiameterHeader(dpa, header, error), "diameter dpa header parses");
+    ok &= expect(header.commandCode == 282, "diameter dpa has command 282");
+    ok &= expect(!header.request, "diameter dpa has answer flag");
+    ok &= expect(vepc::formatDiameterCommand(header.commandCode, header.request) == "Disconnect-Peer-Answer (DPA)",
+                 "diameter formatter recognizes DPA");
+
     return ok ? 0 : 1;
 }

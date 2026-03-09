@@ -1793,6 +1793,7 @@ void VNodeController::interfaceEndpointThread(InterfaceConfigEntry entry) {
 #endif
 
             bool keepConnection = true;
+            bool disconnectPeer = false;
             while (keepConnection && running) {
 #ifdef _WIN32
             const int received = recv(clientSocket, buffer.data(), static_cast<int>(buffer.size()), 0);
@@ -1875,6 +1876,32 @@ void VNodeController::interfaceEndpointThread(InterfaceConfigEntry entry) {
                             }
                             runtimeState.lastDetail = dwrDetail;
                             diameterDetailForLog = dwrDetail;
+                        } else if (header.commandCode == 282 && header.request) {
+                            vepc::DiameterDisconnectPeerRequest dpr;
+                            if (!vepc::parseDisconnectPeerRequest(packet, dpr, parseError)) {
+                                runtimeState.lastMessage = "Rejected Diameter";
+                                runtimeState.lastDetail = parseError;
+                                setInterfaceEndpointState(endpointKey, runtimeState);
+                                log("S6A", "Rejected Diameter DPR from " + peerIp + ": " + parseError);
+                                closeNativeSocket(clientSocket);
+                                continue;
+                            }
+
+                            std::ostringstream dprDetail;
+                            if (dpr.hasOriginHost) {
+                                dprDetail << "origin_host=" << dpr.originHost;
+                            }
+                            if (dpr.hasDisconnectCause) {
+                                if (dprDetail.tellp() > 0) {
+                                    dprDetail << ", ";
+                                }
+                                dprDetail << "disconnect_cause=" << dpr.disconnectCause;
+                            }
+                            if (dprDetail.tellp() <= 0) {
+                                dprDetail << "no Origin-Host/Disconnect-Cause AVPs";
+                            }
+                            runtimeState.lastDetail = dprDetail.str();
+                            diameterDetailForLog = dprDetail.str();
                         }
 
                         setInterfaceEndpointState(endpointKey, runtimeState);
@@ -1945,9 +1972,35 @@ void VNodeController::interfaceEndpointThread(InterfaceConfigEntry entry) {
                             } else {
                                 log("S6A", "Failed to send Diameter response to " + peerIp + ": " + getSocketErrorText());
                             }
+                        } else if (header.commandCode == 282 && header.request) {
+                            const std::string hssHost = config.count("s6a-hss-host") != 0 && !config.at("s6a-hss-host").empty()
+                                ? config.at("s6a-hss-host")
+                                : "hss.vepc.local";
+                            const std::vector<uint8_t> response = vepc::buildDisconnectPeerAnswer(header, hssHost);
+#ifdef _WIN32
+                            const int sent = send(clientSocket,
+                                                  reinterpret_cast<const char*>(response.data()),
+                                                  static_cast<int>(response.size()),
+                                                  0);
+#else
+                            const int sent = static_cast<int>(send(clientSocket,
+                                                                   response.data(),
+                                                                   response.size(),
+                                                                   0));
+#endif
+                            if (sent == static_cast<int>(response.size())) {
+                                std::ostringstream responseLog;
+                                responseLog << "Sent Diameter response to " << peerIp
+                                            << ": command=" << vepc::formatDiameterCommand(282, false)
+                                            << ", bytes=" << response.size();
+                                log("S6A", responseLog.str());
+                            } else {
+                                log("S6A", "Failed to send Diameter response to " + peerIp + ": " + getSocketErrorText());
+                            }
+                            disconnectPeer = true;
                         }
                     }
-                    keepConnection = (entry.name == "S6a");
+                    keepConnection = (entry.name == "S6a") && !disconnectPeer;
                 }
             } else if (received < 0 && running) {
                 log("MAIN", "Interface endpoint " + entry.name + " recv() failed: " + getSocketErrorText());

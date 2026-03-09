@@ -36,6 +36,14 @@ struct DiameterWatchdogRequest {
     bool hasOriginHost = false;
 };
 
+struct DiameterDisconnectPeerRequest {
+    DiameterHeader header;
+    std::string originHost;
+    uint32_t disconnectCause = 0;
+    bool hasOriginHost = false;
+    bool hasDisconnectCause = false;
+};
+
 bool parseDiameterHeader(const std::vector<uint8_t>& packet, DiameterHeader& header, std::string& error);
 bool parseCapabilitiesExchangeRequest(const std::vector<uint8_t>& packet,
                                       DiameterCapabilitiesExchangeRequest& request,
@@ -43,6 +51,9 @@ bool parseCapabilitiesExchangeRequest(const std::vector<uint8_t>& packet,
 bool parseWatchdogRequest(const std::vector<uint8_t>& packet,
                          DiameterWatchdogRequest& request,
                          std::string& error);
+bool parseDisconnectPeerRequest(const std::vector<uint8_t>& packet,
+                                DiameterDisconnectPeerRequest& request,
+                                std::string& error);
 std::string formatDiameterCommand(uint32_t commandCode, bool request);
 std::vector<uint8_t> buildWatchdogRequest(const std::string& originHost,
                                           uint32_t hopByHopId = 0xAAAABBBB,
@@ -50,6 +61,13 @@ std::vector<uint8_t> buildWatchdogRequest(const std::string& originHost,
 std::vector<uint8_t> buildWatchdogAnswer(const DiameterHeader& requestHeader,
                                          const std::string& originHost,
                                          uint32_t resultCode = 2001);
+std::vector<uint8_t> buildDisconnectPeerRequest(const std::string& originHost,
+                                                uint32_t disconnectCause = 0,
+                                                uint32_t hopByHopId = 0x11112222,
+                                                uint32_t endToEndId = 0x33334444);
+std::vector<uint8_t> buildDisconnectPeerAnswer(const DiameterHeader& requestHeader,
+                                               const std::string& originHost,
+                                               uint32_t resultCode = 2001);
 std::vector<uint8_t> buildCapabilitiesExchangeRequest(const std::string& originHost,
                                                       const std::string& originRealm,
                                                       uint32_t hopByHopId = 0x12345678,

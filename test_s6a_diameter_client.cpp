@@ -186,7 +186,7 @@ bool trySendMode(const std::string& mode, std::string& error) {
         return false;
     }
 
-    if (mode == "watchdog") {
+    if (mode == "watchdog" || mode == "disconnect") {
         const std::vector<uint8_t> dwr = vepc::buildWatchdogRequest("mme.vepc.local");
         if (!sendAll(socketHandle, dwr, error)) {
             closeSocket(socketHandle);
@@ -215,6 +215,43 @@ bool trySendMode(const std::string& mode, std::string& error) {
         }
         if (dwaHeader.commandCode != 280 || dwaHeader.request) {
             error = "unexpected DWA response header";
+            closeSocket(socketHandle);
+#ifdef _WIN32
+            WSACleanup();
+#endif
+            return false;
+        }
+    }
+
+    if (mode == "disconnect") {
+        const std::vector<uint8_t> dpr = vepc::buildDisconnectPeerRequest("mme.vepc.local", 0);
+        if (!sendAll(socketHandle, dpr, error)) {
+            closeSocket(socketHandle);
+#ifdef _WIN32
+            WSACleanup();
+#endif
+            return false;
+        }
+
+        std::vector<uint8_t> dpaResponse;
+        if (!recvAll(socketHandle, dpaResponse, error)) {
+            closeSocket(socketHandle);
+#ifdef _WIN32
+            WSACleanup();
+#endif
+            return false;
+        }
+
+        vepc::DiameterHeader dpaHeader;
+        if (!vepc::parseDiameterHeader(dpaResponse, dpaHeader, error)) {
+            closeSocket(socketHandle);
+#ifdef _WIN32
+            WSACleanup();
+#endif
+            return false;
+        }
+        if (dpaHeader.commandCode != 282 || dpaHeader.request) {
+            error = "unexpected DPA response header";
             closeSocket(socketHandle);
 #ifdef _WIN32
             WSACleanup();

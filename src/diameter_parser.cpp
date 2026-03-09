@@ -155,6 +155,9 @@ std::string formatDiameterCommand(uint32_t commandCode, bool request) {
     if (commandCode == 280) {
         return request ? "Device-Watchdog-Request (DWR)" : "Device-Watchdog-Answer (DWA)";
     }
+    if (commandCode == 282) {
+        return request ? "Disconnect-Peer-Request (DPR)" : "Disconnect-Peer-Answer (DPA)";
+    }
 
     std::ostringstream oss;
     oss << (request ? "Request " : "Answer ")
@@ -298,6 +301,107 @@ std::vector<uint8_t> buildWatchdogAnswer(const DiameterHeader& requestHeader,
     uint8_t flags = static_cast<uint8_t>(requestHeader.flags & 0x40);
     response.push_back(flags);
     appendUint24Be(response, 280);
+    appendUint32Be(response, requestHeader.applicationId);
+    appendUint32Be(response, requestHeader.hopByHopId);
+    appendUint32Be(response, requestHeader.endToEndId);
+
+    appendUint32Avp(response, 268, resultCode);
+    appendStringAvp(response, 264, originHost);
+
+    const uint32_t totalLength = static_cast<uint32_t>(response.size());
+    response[1] = static_cast<uint8_t>((totalLength >> 16) & 0xFF);
+    response[2] = static_cast<uint8_t>((totalLength >> 8) & 0xFF);
+    response[3] = static_cast<uint8_t>(totalLength & 0xFF);
+
+    return response;
+}
+
+bool parseDisconnectPeerRequest(const std::vector<uint8_t>& packet,
+                                DiameterDisconnectPeerRequest& request,
+                                std::string& error) {
+    request = {};
+    if (!parseDiameterHeader(packet, request.header, error)) {
+        return false;
+    }
+    if (request.header.commandCode != 282 || !request.header.request) {
+        error = "packet is not a Diameter DPR";
+        return false;
+    }
+
+    std::size_t offset = request.header.headerLength;
+    while (offset < request.header.messageLength) {
+        if (offset + 8 > request.header.messageLength) {
+            error = "truncated Diameter AVP header";
+            return false;
+        }
+
+        const uint32_t avpCode = readUint32Be(&packet[offset]);
+        const uint8_t avpFlags = packet[offset + 4];
+        const uint32_t avpLength = readUint24Be(&packet[offset + 5]);
+        const std::size_t avpHeaderLength = (avpFlags & 0x80) != 0 ? 12u : 8u;
+        if (avpLength < avpHeaderLength) {
+            error = "invalid Diameter AVP length";
+            return false;
+        }
+        if (offset + avpLength > request.header.messageLength) {
+            error = "Diameter AVP exceeds declared message length";
+            return false;
+        }
+
+        const std::size_t payloadOffset = offset + avpHeaderLength;
+        const std::size_t payloadLength = avpLength - avpHeaderLength;
+        if (avpCode == 264) {
+            request.originHost.assign(reinterpret_cast<const char*>(packet.data() + payloadOffset), payloadLength);
+            request.hasOriginHost = true;
+        } else if (avpCode == 273 && payloadLength == 4) {
+            request.disconnectCause = readUint32Be(&packet[payloadOffset]);
+            request.hasDisconnectCause = true;
+        }
+
+        offset += paddedAvpLength(avpLength);
+    }
+
+    return true;
+}
+
+std::vector<uint8_t> buildDisconnectPeerRequest(const std::string& originHost,
+                                                uint32_t disconnectCause,
+                                                uint32_t hopByHopId,
+                                                uint32_t endToEndId) {
+    std::vector<uint8_t> request;
+    request.reserve(64);
+
+    request.push_back(0x01);
+    appendUint24Be(request, 0);
+    request.push_back(0x80);
+    appendUint24Be(request, 282);
+    appendUint32Be(request, 0);
+    appendUint32Be(request, hopByHopId);
+    appendUint32Be(request, endToEndId);
+
+    appendStringAvp(request, 264, originHost);
+    appendUint32Avp(request, 273, disconnectCause);
+
+    const uint32_t totalLength = static_cast<uint32_t>(request.size());
+    request[1] = static_cast<uint8_t>((totalLength >> 16) & 0xFF);
+    request[2] = static_cast<uint8_t>((totalLength >> 8) & 0xFF);
+    request[3] = static_cast<uint8_t>(totalLength & 0xFF);
+
+    return request;
+}
+
+std::vector<uint8_t> buildDisconnectPeerAnswer(const DiameterHeader& requestHeader,
+                                               const std::string& originHost,
+                                               uint32_t resultCode) {
+    std::vector<uint8_t> response;
+    response.reserve(64);
+
+    response.push_back(0x01);
+    appendUint24Be(response, 0);
+
+    uint8_t flags = static_cast<uint8_t>(requestHeader.flags & 0x40);
+    response.push_back(flags);
+    appendUint24Be(response, 282);
     appendUint32Be(response, requestHeader.applicationId);
     appendUint32Be(response, requestHeader.hopByHopId);
     appendUint32Be(response, requestHeader.endToEndId);

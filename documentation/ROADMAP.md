@@ -640,6 +640,21 @@
    - Ожидаемый результат:
       - `S6a` поддерживает persistent Diameter peer session с CER/CEA + DWR/DWA, что является обязательной основой перед добавлением прикладных сообщений (AIR/AIA, ULR/ULA)
 
+15. Шаг 5.15: сделано
+   - Файлы: `main.cpp`, `src/diameter_parser.h`, `src/diameter_parser.cpp`, `test_diameter_parser.cpp`, `test_s6a_diameter_client.cpp`, `cmake/TestS6aDisconnect.cmake`, `CMakeLists.txt`
+   - Изменения:
+      - добавить поддержку `Disconnect-Peer-Request/Answer` (`DPR/DPA`, command 282) — механизм RFC 6733 для корректного закрытия Diameter peer-соединения
+      - парсер: `DiameterDisconnectPeerRequest` с `Origin-Host` и `Disconnect-Cause` (AVP 273); `parseDisconnectPeerRequest()`, `buildDisconnectPeerRequest()`, `buildDisconnectPeerAnswer()`; `formatDiameterCommand()` распознаёт command 282
+      - runtime: `S6a` TCP handler обрабатывает DPR — парсит AVP, обновляет telemetry, отправляет DPA и закрывает соединение (`keepConnection = false`)
+      - тест-клиент: режим `disconnect` — выполняет CER→CEA→DWR→DWA→DPR→DPA полный цикл Diameter peer session
+      - smoke `s6a-disconnect-smoke` доказывает DPR roundtrip, проверяет `Last Message: DPR`, `Last Detail: origin_host=...` и логи DPR/DPA
+   - Проверка:
+      - `cmake --build build-win --config Release`
+      - `ctest --test-dir build-win -C Release -R "diameter-parser-smoke|s6a-(telemetry|watchdog|disconnect)-smoke" --output-on-failure`
+      - `ctest --test-dir build-win -C Release --output-on-failure`
+   - Ожидаемый результат:
+      - `S6a` полностью закрывает базовый Diameter RFC 6733 peer lifecycle: CER/CEA (установка), DWR/DWA (поддержание), DPR/DPA (корректное закрытие), что является полной основой для перехода к прикладным сообщениям (AIR/AIA, ULR/ULA)
+
 ## Ближайший план (рекомендуемый порядок)
 
 1. Закрыть `Этап 0.6`: help по режимам, структурированные обёртки для всех runtime-команд, стабильные smoke tests.
