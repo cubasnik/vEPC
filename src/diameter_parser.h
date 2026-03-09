@@ -84,6 +84,26 @@ struct DiameterCancelLocationRequest {
     bool hasUserName = false;
 };
 
+struct DiameterInsertSubscriberDataRequest {
+    DiameterHeader header;
+    std::string originHost;
+    std::string originRealm;
+    std::string userName;
+    bool hasOriginHost = false;
+    bool hasOriginRealm = false;
+    bool hasUserName = false;
+};
+
+struct DiameterDeleteSubscriberDataRequest {
+    DiameterHeader header;
+    std::string originHost;
+    std::string originRealm;
+    std::string userName;
+    bool hasOriginHost = false;
+    bool hasOriginRealm = false;
+    bool hasUserName = false;
+};
+
 constexpr uint32_t kS6aApplicationId = 16777251;
 
 bool parseDiameterHeader(const std::vector<uint8_t>& packet, DiameterHeader& header, std::string& error);
@@ -158,6 +178,30 @@ std::vector<uint8_t> buildCancelLocationAnswer(const DiameterHeader& requestHead
                                                const std::string& originHost,
                                                const std::string& originRealm,
                                                uint32_t resultCode = 2001);
+bool parseInsertSubscriberDataRequest(const std::vector<uint8_t>& packet,
+                                     DiameterInsertSubscriberDataRequest& request,
+                                     std::string& error);
+std::vector<uint8_t> buildInsertSubscriberDataRequest(const std::string& originHost,
+                                                      const std::string& originRealm,
+                                                      const std::string& userName,
+                                                      uint32_t hopByHopId = 0xCCCCDDDD,
+                                                      uint32_t endToEndId = 0xEEEEFFFF);
+std::vector<uint8_t> buildInsertSubscriberDataAnswer(const DiameterHeader& requestHeader,
+                                                     const std::string& originHost,
+                                                     const std::string& originRealm,
+                                                     uint32_t resultCode = 2001);
+bool parseDeleteSubscriberDataRequest(const std::vector<uint8_t>& packet,
+                                     DiameterDeleteSubscriberDataRequest& request,
+                                     std::string& error);
+std::vector<uint8_t> buildDeleteSubscriberDataRequest(const std::string& originHost,
+                                                      const std::string& originRealm,
+                                                      const std::string& userName,
+                                                      uint32_t hopByHopId = 0x11112233,
+                                                      uint32_t endToEndId = 0x44556677);
+std::vector<uint8_t> buildDeleteSubscriberDataAnswer(const DiameterHeader& requestHeader,
+                                                     const std::string& originHost,
+                                                     const std::string& originRealm,
+                                                     uint32_t resultCode = 2001);
 std::vector<uint8_t> buildCapabilitiesExchangeRequest(const std::string& originHost,
                                                       const std::string& originRealm,
                                                       uint32_t hopByHopId = 0x12345678,

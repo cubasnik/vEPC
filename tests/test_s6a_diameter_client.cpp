@@ -444,6 +444,98 @@ bool trySendMode(const std::string& mode, std::string& error) {
         }
     }
 
+    if (mode == "insert") {
+        const std::vector<uint8_t> idr = vepc::buildInsertSubscriberDataRequest(
+            "mme.vepc.local", "epc.mnc001.mcc001.3gppnetwork.org", "001010123456789");
+        if (!sendAll(socketHandle, idr, error)) {
+            closeSocket(socketHandle);
+#ifdef _WIN32
+            WSACleanup();
+#endif
+            return false;
+        }
+
+        std::vector<uint8_t> idaResponse;
+        if (!recvAll(socketHandle, idaResponse, error)) {
+            closeSocket(socketHandle);
+#ifdef _WIN32
+            WSACleanup();
+#endif
+            return false;
+        }
+
+        vepc::DiameterHeader idaHeader;
+        if (!vepc::parseDiameterHeader(idaResponse, idaHeader, error)) {
+            closeSocket(socketHandle);
+#ifdef _WIN32
+            WSACleanup();
+#endif
+            return false;
+        }
+        if (idaHeader.commandCode != 319 || idaHeader.request) {
+            error = "unexpected IDA response header";
+            closeSocket(socketHandle);
+#ifdef _WIN32
+            WSACleanup();
+#endif
+            return false;
+        }
+        if (idaHeader.applicationId != vepc::kS6aApplicationId) {
+            error = "unexpected IDA application-id";
+            closeSocket(socketHandle);
+#ifdef _WIN32
+            WSACleanup();
+#endif
+            return false;
+        }
+    }
+
+    if (mode == "delete") {
+        const std::vector<uint8_t> dsr = vepc::buildDeleteSubscriberDataRequest(
+            "mme.vepc.local", "epc.mnc001.mcc001.3gppnetwork.org", "001010123456789");
+        if (!sendAll(socketHandle, dsr, error)) {
+            closeSocket(socketHandle);
+#ifdef _WIN32
+            WSACleanup();
+#endif
+            return false;
+        }
+
+        std::vector<uint8_t> dsaResponse;
+        if (!recvAll(socketHandle, dsaResponse, error)) {
+            closeSocket(socketHandle);
+#ifdef _WIN32
+            WSACleanup();
+#endif
+            return false;
+        }
+
+        vepc::DiameterHeader dsaHeader;
+        if (!vepc::parseDiameterHeader(dsaResponse, dsaHeader, error)) {
+            closeSocket(socketHandle);
+#ifdef _WIN32
+            WSACleanup();
+#endif
+            return false;
+        }
+        if (dsaHeader.commandCode != 320 || dsaHeader.request) {
+            error = "unexpected DSA response header";
+            closeSocket(socketHandle);
+#ifdef _WIN32
+            WSACleanup();
+#endif
+            return false;
+        }
+        if (dsaHeader.applicationId != vepc::kS6aApplicationId) {
+            error = "unexpected DSA application-id";
+            closeSocket(socketHandle);
+#ifdef _WIN32
+            WSACleanup();
+#endif
+            return false;
+        }
+    }
+
     closeSocket(socketHandle);
 #ifdef _WIN32
     WSACleanup();

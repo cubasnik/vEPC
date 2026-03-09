@@ -170,6 +170,12 @@ std::string formatDiameterCommand(uint32_t commandCode, bool request) {
     if (commandCode == 321) {
         return request ? "Purge-UE-Request (PUR)" : "Purge-UE-Answer (PUA)";
     }
+    if (commandCode == 319) {
+        return request ? "Insert-Subscriber-Data-Request (IDR)" : "Insert-Subscriber-Data-Answer (IDA)";
+    }
+    if (commandCode == 320) {
+        return request ? "Delete-Subscriber-Data-Request (DSR)" : "Delete-Subscriber-Data-Answer (DSA)";
+    }
 
     std::ostringstream oss;
     oss << (request ? "Request " : "Answer ")
@@ -848,6 +854,190 @@ std::vector<uint8_t> buildCancelLocationAnswer(const DiameterHeader& requestHead
     uint8_t flags = static_cast<uint8_t>(requestHeader.flags & 0x40);
     response.push_back(flags);
     appendUint24Be(response, 317);
+    appendUint32Be(response, kS6aApplicationId);
+    appendUint32Be(response, requestHeader.hopByHopId);
+    appendUint32Be(response, requestHeader.endToEndId);
+
+    appendUint32Avp(response, 268, resultCode);
+    appendStringAvp(response, 264, originHost);
+    appendStringAvp(response, 296, originRealm);
+
+    const uint32_t totalLength = static_cast<uint32_t>(response.size());
+    response[1] = static_cast<uint8_t>((totalLength >> 16) & 0xFF);
+    response[2] = static_cast<uint8_t>((totalLength >> 8) & 0xFF);
+    response[3] = static_cast<uint8_t>(totalLength & 0xFF);
+
+    return response;
+}
+
+bool parseInsertSubscriberDataRequest(const std::vector<uint8_t>& packet,
+                                     DiameterInsertSubscriberDataRequest& request,
+                                     std::string& error) {
+    if (!parseDiameterHeader(packet, request.header, error)) {
+        return false;
+    }
+    if (request.header.commandCode != 319 || !request.header.request) {
+        error = "not an Insert-Subscriber-Data-Request";
+        return false;
+    }
+
+    size_t offset = 20;
+    while (offset + 8 <= packet.size()) {
+        const uint32_t avpCode = readUint32Be(&packet[offset]);
+        const uint32_t avpLength = readUint24Be(&packet[offset + 5]);
+        if (avpLength < 8 || offset + avpLength > packet.size()) break;
+        const size_t dataOffset = offset + 8;
+        const size_t dataLength = avpLength - 8;
+
+        if (avpCode == 264 && dataLength > 0) {
+            request.originHost.assign(reinterpret_cast<const char*>(&packet[dataOffset]), dataLength);
+            request.hasOriginHost = true;
+        } else if (avpCode == 296 && dataLength > 0) {
+            request.originRealm.assign(reinterpret_cast<const char*>(&packet[dataOffset]), dataLength);
+            request.hasOriginRealm = true;
+        } else if (avpCode == 1 && dataLength > 0) {
+            request.userName.assign(reinterpret_cast<const char*>(&packet[dataOffset]), dataLength);
+            request.hasUserName = true;
+        }
+
+        offset += paddedAvpLength(avpLength);
+    }
+    return true;
+}
+
+std::vector<uint8_t> buildInsertSubscriberDataRequest(const std::string& originHost,
+                                                      const std::string& originRealm,
+                                                      const std::string& userName,
+                                                      uint32_t hopByHopId,
+                                                      uint32_t endToEndId) {
+    std::vector<uint8_t> request;
+    request.reserve(128);
+
+    request.push_back(0x01);
+    appendUint24Be(request, 0);
+    request.push_back(0xC0);
+    appendUint24Be(request, 319);
+    appendUint32Be(request, kS6aApplicationId);
+    appendUint32Be(request, hopByHopId);
+    appendUint32Be(request, endToEndId);
+
+    appendStringAvp(request, 264, originHost);
+    appendStringAvp(request, 296, originRealm);
+    appendStringAvp(request, 1, userName, 0x40);
+
+    const uint32_t totalLength = static_cast<uint32_t>(request.size());
+    request[1] = static_cast<uint8_t>((totalLength >> 16) & 0xFF);
+    request[2] = static_cast<uint8_t>((totalLength >> 8) & 0xFF);
+    request[3] = static_cast<uint8_t>(totalLength & 0xFF);
+
+    return request;
+}
+
+std::vector<uint8_t> buildInsertSubscriberDataAnswer(const DiameterHeader& requestHeader,
+                                                     const std::string& originHost,
+                                                     const std::string& originRealm,
+                                                     uint32_t resultCode) {
+    std::vector<uint8_t> response;
+    response.reserve(128);
+
+    response.push_back(0x01);
+    appendUint24Be(response, 0);
+
+    uint8_t flags = static_cast<uint8_t>(requestHeader.flags & 0x40);
+    response.push_back(flags);
+    appendUint24Be(response, 319);
+    appendUint32Be(response, kS6aApplicationId);
+    appendUint32Be(response, requestHeader.hopByHopId);
+    appendUint32Be(response, requestHeader.endToEndId);
+
+    appendUint32Avp(response, 268, resultCode);
+    appendStringAvp(response, 264, originHost);
+    appendStringAvp(response, 296, originRealm);
+
+    const uint32_t totalLength = static_cast<uint32_t>(response.size());
+    response[1] = static_cast<uint8_t>((totalLength >> 16) & 0xFF);
+    response[2] = static_cast<uint8_t>((totalLength >> 8) & 0xFF);
+    response[3] = static_cast<uint8_t>(totalLength & 0xFF);
+
+    return response;
+}
+
+bool parseDeleteSubscriberDataRequest(const std::vector<uint8_t>& packet,
+                                     DiameterDeleteSubscriberDataRequest& request,
+                                     std::string& error) {
+    if (!parseDiameterHeader(packet, request.header, error)) {
+        return false;
+    }
+    if (request.header.commandCode != 320 || !request.header.request) {
+        error = "not a Delete-Subscriber-Data-Request";
+        return false;
+    }
+
+    size_t offset = 20;
+    while (offset + 8 <= packet.size()) {
+        const uint32_t avpCode = readUint32Be(&packet[offset]);
+        const uint32_t avpLength = readUint24Be(&packet[offset + 5]);
+        if (avpLength < 8 || offset + avpLength > packet.size()) break;
+        const size_t dataOffset = offset + 8;
+        const size_t dataLength = avpLength - 8;
+
+        if (avpCode == 264 && dataLength > 0) {
+            request.originHost.assign(reinterpret_cast<const char*>(&packet[dataOffset]), dataLength);
+            request.hasOriginHost = true;
+        } else if (avpCode == 296 && dataLength > 0) {
+            request.originRealm.assign(reinterpret_cast<const char*>(&packet[dataOffset]), dataLength);
+            request.hasOriginRealm = true;
+        } else if (avpCode == 1 && dataLength > 0) {
+            request.userName.assign(reinterpret_cast<const char*>(&packet[dataOffset]), dataLength);
+            request.hasUserName = true;
+        }
+
+        offset += paddedAvpLength(avpLength);
+    }
+    return true;
+}
+
+std::vector<uint8_t> buildDeleteSubscriberDataRequest(const std::string& originHost,
+                                                      const std::string& originRealm,
+                                                      const std::string& userName,
+                                                      uint32_t hopByHopId,
+                                                      uint32_t endToEndId) {
+    std::vector<uint8_t> request;
+    request.reserve(128);
+
+    request.push_back(0x01);
+    appendUint24Be(request, 0);
+    request.push_back(0xC0);
+    appendUint24Be(request, 320);
+    appendUint32Be(request, kS6aApplicationId);
+    appendUint32Be(request, hopByHopId);
+    appendUint32Be(request, endToEndId);
+
+    appendStringAvp(request, 264, originHost);
+    appendStringAvp(request, 296, originRealm);
+    appendStringAvp(request, 1, userName, 0x40);
+
+    const uint32_t totalLength = static_cast<uint32_t>(request.size());
+    request[1] = static_cast<uint8_t>((totalLength >> 16) & 0xFF);
+    request[2] = static_cast<uint8_t>((totalLength >> 8) & 0xFF);
+    request[3] = static_cast<uint8_t>(totalLength & 0xFF);
+
+    return request;
+}
+
+std::vector<uint8_t> buildDeleteSubscriberDataAnswer(const DiameterHeader& requestHeader,
+                                                     const std::string& originHost,
+                                                     const std::string& originRealm,
+                                                     uint32_t resultCode) {
+    std::vector<uint8_t> response;
+    response.reserve(128);
+
+    response.push_back(0x01);
+    appendUint24Be(response, 0);
+
+    uint8_t flags = static_cast<uint8_t>(requestHeader.flags & 0x40);
+    response.push_back(flags);
+    appendUint24Be(response, 320);
     appendUint32Be(response, kS6aApplicationId);
     appendUint32Be(response, requestHeader.hopByHopId);
     appendUint32Be(response, requestHeader.endToEndId);

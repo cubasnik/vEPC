@@ -140,6 +140,24 @@ add_test(
         -P ${CMAKE_SOURCE_DIR}/cmake/TestS6aCancelLocation.cmake
 )
 add_test(
+    NAME s6a-insert-subscriber-data-smoke
+    COMMAND ${CMAKE_COMMAND}
+        -DVEPC_EXE=$<TARGET_FILE:vepc>
+        -DRUNTIME_CLI_EXE=$<TARGET_FILE:test-runtime-cli>
+        -DS6A_DIAMETER_CLIENT_EXE=$<TARGET_FILE:test-s6a-diameter-client>
+        -DSOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -P ${CMAKE_SOURCE_DIR}/cmake/TestS6aInsertSubscriberData.cmake
+)
+add_test(
+    NAME s6a-delete-subscriber-data-smoke
+    COMMAND ${CMAKE_COMMAND}
+        -DVEPC_EXE=$<TARGET_FILE:vepc>
+        -DRUNTIME_CLI_EXE=$<TARGET_FILE:test-runtime-cli>
+        -DS6A_DIAMETER_CLIENT_EXE=$<TARGET_FILE:test-s6a-diameter-client>
+        -DSOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -P ${CMAKE_SOURCE_DIR}/cmake/TestS6aDeleteSubscriberData.cmake
+)
+add_test(
     NAME s11-telemetry-smoke
     COMMAND ${CMAKE_COMMAND}
         -DVEPC_EXE=$<TARGET_FILE:vepc>

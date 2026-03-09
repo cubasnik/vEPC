@@ -280,5 +280,65 @@ int main() {
     ok &= expect(vepc::formatDiameterCommand(header.commandCode, header.request) == "Cancel-Location-Answer (CLA)",
                  "diameter formatter recognizes CLA");
 
+    // IDR builder / parser tests
+    const std::vector<uint8_t> idr = vepc::buildInsertSubscriberDataRequest("mme.vepc.local",
+                                                                             "epc.mnc001.mcc001.3gppnetwork.org",
+                                                                             "001010123456789");
+    ok &= expect(vepc::parseDiameterHeader(idr, header, error), "diameter idr header parses");
+    ok &= expect(header.commandCode == 319, "diameter idr has command 319");
+    ok &= expect(header.request, "diameter idr has request flag");
+    ok &= expect(header.applicationId == vepc::kS6aApplicationId, "diameter idr has s6a app id");
+    ok &= expect(vepc::formatDiameterCommand(header.commandCode, header.request) == "Insert-Subscriber-Data-Request (IDR)",
+                 "diameter formatter recognizes IDR");
+
+    vepc::DiameterInsertSubscriberDataRequest idrRequest;
+    ok &= expect(vepc::parseInsertSubscriberDataRequest(idr, idrRequest, error), "diameter idr avps parse");
+    ok &= expect(idrRequest.hasOriginHost && idrRequest.originHost == "mme.vepc.local",
+                 "diameter idr origin-host parses");
+    ok &= expect(idrRequest.hasOriginRealm && idrRequest.originRealm == "epc.mnc001.mcc001.3gppnetwork.org",
+                 "diameter idr origin-realm parses");
+    ok &= expect(idrRequest.hasUserName && idrRequest.userName == "001010123456789",
+                 "diameter idr user-name parses");
+
+    // IDA builder test
+    const std::vector<uint8_t> ida = vepc::buildInsertSubscriberDataAnswer(header, "hss.vepc.local",
+                                                                            "epc.mnc001.mcc001.3gppnetwork.org");
+    ok &= expect(vepc::parseDiameterHeader(ida, header, error), "diameter ida header parses");
+    ok &= expect(header.commandCode == 319, "diameter ida has command 319");
+    ok &= expect(!header.request, "diameter ida has answer flag");
+    ok &= expect(header.applicationId == vepc::kS6aApplicationId, "diameter ida has s6a app id");
+    ok &= expect(vepc::formatDiameterCommand(header.commandCode, header.request) == "Insert-Subscriber-Data-Answer (IDA)",
+                 "diameter formatter recognizes IDA");
+
+    // DSR builder / parser tests
+    const std::vector<uint8_t> dsr = vepc::buildDeleteSubscriberDataRequest("mme.vepc.local",
+                                                                             "epc.mnc001.mcc001.3gppnetwork.org",
+                                                                             "001010123456789");
+    ok &= expect(vepc::parseDiameterHeader(dsr, header, error), "diameter dsr header parses");
+    ok &= expect(header.commandCode == 320, "diameter dsr has command 320");
+    ok &= expect(header.request, "diameter dsr has request flag");
+    ok &= expect(header.applicationId == vepc::kS6aApplicationId, "diameter dsr has s6a app id");
+    ok &= expect(vepc::formatDiameterCommand(header.commandCode, header.request) == "Delete-Subscriber-Data-Request (DSR)",
+                 "diameter formatter recognizes DSR");
+
+    vepc::DiameterDeleteSubscriberDataRequest dsrRequest;
+    ok &= expect(vepc::parseDeleteSubscriberDataRequest(dsr, dsrRequest, error), "diameter dsr avps parse");
+    ok &= expect(dsrRequest.hasOriginHost && dsrRequest.originHost == "mme.vepc.local",
+                 "diameter dsr origin-host parses");
+    ok &= expect(dsrRequest.hasOriginRealm && dsrRequest.originRealm == "epc.mnc001.mcc001.3gppnetwork.org",
+                 "diameter dsr origin-realm parses");
+    ok &= expect(dsrRequest.hasUserName && dsrRequest.userName == "001010123456789",
+                 "diameter dsr user-name parses");
+
+    // DSA builder test
+    const std::vector<uint8_t> dsa = vepc::buildDeleteSubscriberDataAnswer(header, "hss.vepc.local",
+                                                                            "epc.mnc001.mcc001.3gppnetwork.org");
+    ok &= expect(vepc::parseDiameterHeader(dsa, header, error), "diameter dsa header parses");
+    ok &= expect(header.commandCode == 320, "diameter dsa has command 320");
+    ok &= expect(!header.request, "diameter dsa has answer flag");
+    ok &= expect(header.applicationId == vepc::kS6aApplicationId, "diameter dsa has s6a app id");
+    ok &= expect(vepc::formatDiameterCommand(header.commandCode, header.request) == "Delete-Subscriber-Data-Answer (DSA)",
+                 "diameter formatter recognizes DSA");
+
     return ok ? 0 : 1;
 }

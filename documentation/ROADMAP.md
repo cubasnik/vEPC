@@ -672,7 +672,7 @@
       - `S6a` получает первые прикладные Diameter процедуры поверх завершённого базового peer lifecycle, в которых MME отправляет запросы аутентификации и обновления локации к HSS, а runtime telemetry отражает IMSI и Origin-Host из каждого сообщения
 
 17. Шаг 5.17: сделано
-   - Файлы: `main.cpp`, `src/diameter_parser.h`, `src/diameter_parser.cpp`, `test_diameter_parser.cpp`, `test_s6a_diameter_client.cpp`, `cmake/TestS6aPurge.cmake`, `cmake/TestS6aCancelLocation.cmake`, `CMakeLists.txt`
+   - Файлы: `main.cpp`, `src/diameter_parser.h`, `src/diameter_parser.cpp`, `tests/test_diameter_parser.cpp`, `tests/test_s6a_diameter_client.cpp`, `cmake/TestS6aPurge.cmake`, `cmake/TestS6aCancelLocation.cmake`, `CMakeLists.txt`
    - Изменения:
       - добавить следующие прикладные S6a сообщения: `Purge-UE-Request/Answer` (`PUR/PUA`, command 321) и `Cancel-Location-Request/Answer` (`CLR/CLA`, command 317) — процедуры 3GPP TS 29.272 для управления жизненным циклом абонента между MME и HSS
       - парсер: `DiameterPurgeUeRequest` и `DiameterCancelLocationRequest` с `Origin-Host`, `Origin-Realm` и `User-Name` (IMSI); `parsePurgeUeRequest()`, `buildPurgeUeRequest()`, `buildPurgeUeAnswer()` для command 321; `parseCancelLocationRequest()`, `buildCancelLocationRequest()`, `buildCancelLocationAnswer()` для command 317; оба сообщения используют флаги `0xC0` (Request + Proxiable), `app_id = 16777251`; `formatDiameterCommand()` распознаёт commands 321 и 317
@@ -680,6 +680,15 @@
       - тест-клиент: режим `purge` — выполняет CER→CEA→PUR→PUA; режим `cancel` — выполняет CER→CEA→CLR→CLA; оба валидируют command code, answer flag и S6a application-id
       - smoke `s6a-purge-smoke` доказывает PUR roundtrip, проверяет `Last Message: PUR`, `Last Detail: imsi=...` и логи PUR/PUA
       - smoke `s6a-cancel-location-smoke` доказывает CLR roundtrip, проверяет `Last Message: CLR`, `Last Detail: imsi=...` и логи CLR/CLA
+18. Шаг 5.18: сделано
+   - Файлы: `main.cpp`, `src/diameter_parser.h`, `src/diameter_parser.cpp`, `tests/test_diameter_parser.cpp`, `tests/test_s6a_diameter_client.cpp`, `cmake/TestS6aInsertSubscriberData.cmake`, `cmake/TestS6aDeleteSubscriberData.cmake`, `CMakeLists.txt`
+   - Изменения:
+      - добавить следующие прикладные S6a сообщения: `Insert-Subscriber-Data-Request/Answer` (`IDR/IDA`, command 319) и `Delete-Subscriber-Data-Request/Answer` (`DSR/DSA`, command 320) — процедуры 3GPP TS 29.272 для управления данными абонента: HSS отправляет IDR на MME для вставки/обновления профиля, DSR — для удаления данных подписки
+      - парсер: `DiameterInsertSubscriberDataRequest` и `DiameterDeleteSubscriberDataRequest` с `Origin-Host`, `Origin-Realm` и `User-Name` (IMSI); `parseInsertSubscriberDataRequest()`, `buildInsertSubscriberDataRequest()`, `buildInsertSubscriberDataAnswer()` для command 319; `parseDeleteSubscriberDataRequest()`, `buildDeleteSubscriberDataRequest()`, `buildDeleteSubscriberDataAnswer()` для command 320; оба сообщения используют флаги `0xC0` (Request + Proxiable), `app_id = 16777251`; `formatDiameterCommand()` распознаёт commands 319 и 320
+      - runtime: `S6a` TCP handler обрабатывает IDR — парсит AVP, извлекает IMSI и Origin-Host в telemetry detail, отправляет IDA; аналогично для DSR → DSA
+      - тест-клиент: режим `insert` — выполняет CER→CEA→IDR→IDA; режим `delete` — выполняет CER→CEA→DSR→DSA; оба валидируют command code, answer flag и S6a application-id
+      - smoke `s6a-insert-subscriber-data-smoke` доказывает IDR roundtrip, проверяет `Last Message: IDR`, `Last Detail: imsi=...` и логи IDR/IDA
+      - smoke `s6a-delete-subscriber-data-smoke` доказывает DSR roundtrip, проверяет `Last Message: DSR`, `Last Detail: imsi=...` и логи DSR/DSA
    - Проверка:
       - `cmake --build build-win --config Release`
       - `ctest --test-dir build-win -C Release -R "diameter-parser-smoke|s6a-(telemetry|watchdog|disconnect|auth|location|purge|cancel-location)-smoke" --output-on-failure`
