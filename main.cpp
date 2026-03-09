@@ -24,6 +24,7 @@
 #include <netinet/in.h>
 #endif
 #include <csignal>
+#include <clocale>
 #include <filesystem>
 
 #include "src/gtp_parser.h"
@@ -34,6 +35,7 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <iphlpapi.h>
+#include <windows.h>
 #endif
 
 // Пути относительно рабочей директории (папки проекта)
@@ -190,6 +192,14 @@ static void setConfigAlias(std::map<std::string, std::string>& config,
 static bool startsWith(const std::string& value, const std::string& prefix) {
     return value.rfind(prefix, 0) == 0;
 }
+
+#ifdef _WIN32
+static void configureWindowsConsoleUtf8() {
+    SetConsoleOutputCP(CP_UTF8);
+    SetConsoleCP(CP_UTF8);
+    std::setlocale(LC_ALL, ".UTF-8");
+}
+#endif
 
 static bool isSharedConfigKey(const std::string& key) {
     return key == "mcc" || key == "mnc";
@@ -400,18 +410,26 @@ static void closeNativeSocket(NativeSocket socketHandle) {
 #endif
 }
 
+static bool tryGetLocalTime(std::time_t value, std::tm& result) {
+#ifdef _WIN32
+    return localtime_s(&result, &value) == 0;
+#else
+    return localtime_r(&value, &result) != nullptr;
+#endif
+}
+
 static std::string formatTimestamp(std::time_t value) {
     if (value == 0) {
         return "n/a";
     }
 
     char buffer[64]{};
-    std::tm* tm = std::localtime(&value);
-    if (tm == nullptr) {
+    std::tm localTime{};
+    if (!tryGetLocalTime(value, localTime)) {
         return "n/a";
     }
 
-    std::strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", tm);
+    std::strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", &localTime);
     return buffer;
 }
 
@@ -602,10 +620,14 @@ void VNodeController::colorLog(const std::string& node, const std::string& msg) 
     std::cout << style << color << "[" << node << "] " << msg << COLOR_RESET << "\n";
 
     if (logFile.is_open()) {
-        std::tm* tm = std::localtime(&logs.back().time);
         char buf[64];
-        std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", tm);
-        logFile << "[" << buf << "] [" << node << "] " << msg << "\n";
+        std::tm localTime{};
+        if (tryGetLocalTime(logs.back().time, localTime)) {
+            std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &localTime);
+            logFile << "[" << buf << "] [" << node << "] " << msg << "\n";
+        } else {
+            logFile << "[timestamp-unavailable] [" << node << "] " << msg << "\n";
+        }
         logFile.flush();
     }
 }
@@ -1210,10 +1232,14 @@ std::string VNodeController::handleCliCommand(const std::string& cmd, bool& shou
         std::ostringstream oss;
         const size_t start = logs.size() > 20 ? logs.size() - 20 : 0;
         for (size_t i = start; i < logs.size(); ++i) {
-            std::tm* tm = std::localtime(&logs[i].time);
             char buf[64];
-            std::strftime(buf, sizeof(buf), "%H:%M:%S", tm);
-            oss << "[" << buf << "][" << logs[i].node << "] " << logs[i].msg << "\n";
+            std::tm localTime{};
+            if (tryGetLocalTime(logs[i].time, localTime)) {
+                std::strftime(buf, sizeof(buf), "%H:%M:%S", &localTime);
+                oss << "[" << buf << "][" << logs[i].node << "] " << logs[i].msg << "\n";
+            } else {
+                oss << "[time?][" << logs[i].node << "] " << logs[i].msg << "\n";
+            }
         }
         return oss.str();
     }
@@ -1489,10 +1515,14 @@ bool VNodeController::handleDemoS1apMessage(NativeSocket clientSocket,
 void VNodeController::printLogs() const {
     std::lock_guard<std::mutex> lock(logMutex);
     for (auto& entry : logs) {
-        std::tm* tm = std::localtime(&entry.time);
         char buf[64];
-        std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", tm);
-        std::cout << "[" << buf << "] [" << entry.node << "] " << entry.msg << "\n";
+        std::tm localTime{};
+        if (tryGetLocalTime(entry.time, localTime)) {
+            std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &localTime);
+            std::cout << "[" << buf << "] [" << entry.node << "] " << entry.msg << "\n";
+        } else {
+            std::cout << "[timestamp-unavailable] [" << entry.node << "] " << entry.msg << "\n";
+        }
     }
 }
 
@@ -2024,6 +2054,10 @@ void signalHandler(int) {
 }
 
 int main() {
+#ifdef _WIN32
+    configureWindowsConsoleUtf8();
+#endif
+
     std::cout << "vEPC - Virtual EPC (SGSN + MME)\n";
     std::cout << "Starting...\n";
 
