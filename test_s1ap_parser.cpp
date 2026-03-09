@@ -22,6 +22,9 @@ int main() {
     bool ok = true;
     std::string error;
     vepc::DemoInitialUeMessage message;
+    vepc::DemoDownlinkNasTransport downlinkTransport;
+    vepc::DemoNasAuthenticationRequest authRequest;
+    vepc::DemoNasAuthenticationResponse authResponse;
 
     const std::vector<uint8_t> initialUeMessage = {
         0x0C,
@@ -42,6 +45,10 @@ int main() {
     const std::vector<uint8_t> expectedAuthRequest = {0x52, 0x01};
     ok &= expect(vepc::buildNasAuthenticationRequest() == expectedAuthRequest,
                  "authentication request bytes are stable");
+    ok &= expect(vepc::parseNasAuthenticationRequest(expectedAuthRequest, authRequest, error),
+                 "authentication request parser accepts stable bytes");
+    ok &= expect(authRequest.hasKeySetIdentifier && authRequest.keySetIdentifier == 0x01,
+                 "authentication request parser extracts key set identifier");
 
     const std::vector<uint8_t> expectedDownlinkTransport = {
         0x0D,
@@ -52,6 +59,22 @@ int main() {
     ok &= expect(vepc::buildDemoDownlinkNasTransport("123456789012345", "guti-001", expectedAuthRequest)
                      == expectedDownlinkTransport,
                  "downlink NAS transport bytes are stable");
+    ok &= expect(vepc::parseDemoDownlinkNasTransport(expectedDownlinkTransport, downlinkTransport, error),
+                 "downlink NAS transport parses");
+    ok &= expect(downlinkTransport.procedureCode == 0x0D,
+                 "downlink NAS transport parser extracts procedure code");
+    ok &= expect(downlinkTransport.imsi == "123456789012345",
+                 "downlink NAS transport parser extracts IMSI");
+    ok &= expect(downlinkTransport.guti == "guti-001",
+                 "downlink NAS transport parser extracts GUTI");
+    ok &= expect(downlinkTransport.nasMessageType == 0x52,
+                 "downlink NAS transport parser extracts NAS message type");
+
+    const std::vector<uint8_t> authResponseBytes = {0x53, 0x01};
+    ok &= expect(vepc::parseNasAuthenticationResponse(authResponseBytes, authResponse, error),
+                 "authentication response parser accepts stable bytes");
+    ok &= expect(authResponse.hasKeySetIdentifier && authResponse.keySetIdentifier == 0x01,
+                 "authentication response parser extracts key set identifier");
 
     const std::vector<uint8_t> invalidProcedure = {
         0x0B,
@@ -72,6 +95,18 @@ int main() {
                  "truncated demo S1AP TLV is rejected");
     ok &= expect(error.find("truncated demo S1AP TLV payload") != std::string::npos,
                  "truncated S1AP error is descriptive");
+
+    const std::vector<uint8_t> shortAuthResponse = {0x53};
+    ok &= expect(!vepc::parseNasAuthenticationResponse(shortAuthResponse, authResponse, error),
+                 "short authentication response is rejected");
+    ok &= expect(error.find("too short") != std::string::npos,
+                 "short authentication response error is descriptive");
+
+    const std::vector<uint8_t> wrongNasType = {0x41, 0x01};
+    ok &= expect(!vepc::parseNasAuthenticationRequest(wrongNasType, authRequest, error),
+                 "wrong NAS message type is rejected for auth request parser");
+    ok &= expect(error.find("unexpected NAS message type") != std::string::npos,
+                 "wrong NAS message type error is descriptive");
 
     return ok ? 0 : 1;
 }

@@ -215,6 +215,20 @@
    - Ожидаемый результат:
       - этап 2 перестаёт быть только parser/test preparation и получает первый живой UE runtime flow
 
+3. Шаг 2.3: сделано
+   - Файлы: `main.cpp`, `src/s1ap_parser.h`, `src/s1ap_parser.cpp`, `test_s1ap_parser.cpp`
+   - Изменения:
+      - добавить явные demo parsers для `Authentication Request`, `Authentication Response` и `Downlink NAS Transport`
+      - расширить `UEContext` полями auth flow state и `security_context_id`, чтобы response валидировался не только по NAS type `0x53`
+      - принимать `Authentication Response` только при наличии ожидаемого pending auth request и совпадающего `security_context_id`
+      - отразить auth-request/auth-response/security-context состояние в `state`
+   - Проверка:
+      - `cmake --build build-win --config Release`
+      - `ctest --test-dir build-win -C Release --output-on-failure`
+      - локальный smoke test `Attach Request -> Authentication Request(ksi) -> Authentication Response(ksi) -> state`
+   - Ожидаемый результат:
+      - auth flow получает минимальную state machine и становится пригодным для дальнейшего расширения NAS/security контекста
+
 ### Этап 3 — Сохранение состояния
 
 Приоритет: `P2`

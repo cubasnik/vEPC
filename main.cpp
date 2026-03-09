@@ -90,9 +90,13 @@ struct UEContext {
     std::string guti;
     std::string peer_id;
     bool        authenticated = false;
+    bool        auth_request_sent = false;
+    bool        auth_response_received = false;
     uint8_t     last_nas_message_type = 0;
     bool        has_last_nas_message_type = false;
     uint8_t     last_s1ap_procedure = 0;
+    uint8_t     security_context_id = 0;
+    bool        has_security_context_id = false;
     std::time_t updated_at = 0;
 };
 
@@ -460,6 +464,33 @@ static std::string formatS1apProcedureValue(const UEContext& context) {
     return vepc::formatS1apProcedureCode(context.last_s1ap_procedure);
 }
 
+static std::string formatSecurityContextIdValue(const UEContext& context) {
+    if (!context.has_security_context_id) {
+        return "n/a";
+    }
+
+    std::ostringstream oss;
+    oss << "0x" << std::uppercase << std::hex << std::setw(2) << std::setfill('0')
+        << static_cast<int>(context.security_context_id);
+    return oss.str();
+}
+
+static std::string formatAuthFlowState(const UEContext& context) {
+    if (context.authenticated) {
+        return "authentication-complete";
+    }
+    if (context.auth_response_received) {
+        return "authentication-response-received";
+    }
+    if (context.auth_request_sent) {
+        return "authentication-request-sent";
+    }
+    if (context.has_last_nas_message_type && context.last_nas_message_type == 0x41) {
+        return "attach-request-received";
+    }
+    return "idle";
+}
+
 static uint32_t allocateCreatePdpTeid(const vepc::GtpV1Header& header) {
     if (header.teid != 0) {
         return header.teid;
@@ -563,6 +594,7 @@ private:
     void setInterfaceEndpointState(const std::string& endpointKey, InterfaceEndpointRuntime runtimeState);
     void upsertPdpContext(const PDPContext& context);
     void upsertUeContext(const UEContext& context);
+    bool tryGetUeContext(const std::string& imsi, UEContext& context) const;
 
     std::atomic<bool> running;
     std::atomic<bool> restartRequested{false};
@@ -1348,6 +1380,10 @@ std::string VNodeController::formatStateSnapshotLocked() const {
             oss << "  Peer: " << (context.peer_id.empty() ? "n/a" : context.peer_id) << "\n";
             oss << "  S1AP Procedure: " << formatS1apProcedureValue(context) << "\n";
             oss << "  NAS Message: " << formatNasMessageTypeValue(context) << "\n";
+            oss << "  Security Context ID: " << formatSecurityContextIdValue(context) << "\n";
+            oss << "  Auth Flow: " << formatAuthFlowState(context) << "\n";
+            oss << "  Auth Request Sent: " << (context.auth_request_sent ? "yes" : "no") << "\n";
+            oss << "  Auth Response Received: " << (context.auth_response_received ? "yes" : "no") << "\n";
             oss << "  Authenticated: " << (context.authenticated ? "yes" : "no") << "\n";
             oss << "  Updated At: " << formatTimestamp(context.updated_at) << "\n";
         }
@@ -1363,6 +1399,17 @@ void VNodeController::upsertPdpContext(const PDPContext& context) {
 void VNodeController::upsertUeContext(const UEContext& context) {
     std::lock_guard<std::mutex> lock(stateMutex);
     ueContexts[context.imsi] = context;
+}
+
+bool VNodeController::tryGetUeContext(const std::string& imsi, UEContext& context) const {
+    std::lock_guard<std::mutex> lock(stateMutex);
+    const auto it = ueContexts.find(imsi);
+    if (it == ueContexts.end()) {
+        return false;
+    }
+
+    context = it->second;
+    return true;
 }
 
 bool VNodeController::sendGtpResponse(NativeSocket socketHandle,
@@ -1465,30 +1512,72 @@ bool VNodeController::handleDemoS1apMessage(NativeSocket clientSocket,
     }
 
     UEContext context;
+    tryGetUeContext(message.imsi, context);
     context.imsi = message.imsi;
-    context.guti = message.guti;
+    context.guti = message.hasGuti ? message.guti : context.guti;
     context.peer_id = peerId;
     context.last_s1ap_procedure = message.procedureCode;
     context.last_nas_message_type = message.nasMessageType;
     context.has_last_nas_message_type = true;
-    context.authenticated = message.nasMessageType == 0x53;
     context.updated_at = std::time(nullptr);
-    upsertUeContext(context);
 
     std::ostringstream parsedMessageLog;
     parsedMessageLog << "Parsed demo Initial UE Message from " << peerId
                      << ": imsi=" << message.imsi
                      << ", guti=" << (message.hasGuti ? message.guti : "n/a")
                      << ", nas=" << vepc::formatNasMessageType(message.nasMessageType)
-                     << ", authenticated=" << (context.authenticated ? "yes" : "no");
+                     << ", auth_flow=" << formatAuthFlowState(context);
     log("S1AP", parsedMessageLog.str());
 
     if (message.nasMessageType == 0x53) {
+        vepc::DemoNasAuthenticationResponse responseInfo;
+        if (!vepc::parseNasAuthenticationResponse(message.nasPdu, responseInfo, parseError)) {
+            log("S1AP", "Rejected demo Authentication Response from " + peerId + ": " + parseError);
+            return false;
+        }
+        if (!context.auth_request_sent || !context.has_security_context_id) {
+            log("S1AP", "Rejected demo Authentication Response from " + peerId + ": no pending authentication request for IMSI " + message.imsi);
+            return false;
+        }
+        if (!responseInfo.hasKeySetIdentifier || responseInfo.keySetIdentifier != context.security_context_id) {
+            std::ostringstream mismatch;
+            mismatch << "Rejected demo Authentication Response from " << peerId
+                     << ": security context mismatch for IMSI " << message.imsi
+                     << " (expected=" << formatSecurityContextIdValue(context)
+                     << ", got=0x" << std::uppercase << std::hex << std::setw(2) << std::setfill('0')
+                     << static_cast<int>(responseInfo.keySetIdentifier) << std::dec << std::setfill(' ') << ")";
+            log("S1AP", mismatch.str());
+            return false;
+        }
+
+        context.auth_response_received = true;
+        context.authenticated = true;
+        upsertUeContext(context);
         log("S1AP", "Authentication Response accepted for IMSI " + message.imsi);
         return true;
     }
 
+    if (message.nasMessageType != 0x41) {
+        context.authenticated = false;
+        upsertUeContext(context);
+        log("S1AP", "No authentication handler for NAS message " + vepc::formatNasMessageType(message.nasMessageType)
+            + " from " + peerId + "; context updated without response");
+        return true;
+    }
+
     const std::vector<uint8_t> nasResponse = vepc::buildNasAuthenticationRequest();
+    vepc::DemoNasAuthenticationRequest requestInfo;
+    if (!vepc::parseNasAuthenticationRequest(nasResponse, requestInfo, parseError)) {
+        log("S1AP", "Failed to build demo Authentication Request for IMSI " + message.imsi + ": " + parseError);
+        return false;
+    }
+
+    context.authenticated = false;
+    context.auth_request_sent = true;
+    context.auth_response_received = false;
+    context.security_context_id = requestInfo.keySetIdentifier;
+    context.has_security_context_id = requestInfo.hasKeySetIdentifier;
+
     const std::vector<uint8_t> response = vepc::buildDemoDownlinkNasTransport(message.imsi, message.guti, nasResponse);
     const int sent = send(clientSocket,
 #ifdef _WIN32
@@ -1503,11 +1592,14 @@ bool VNodeController::handleDemoS1apMessage(NativeSocket clientSocket,
         return false;
     }
 
+    upsertUeContext(context);
+
     std::ostringstream responseLog;
     responseLog << "Sent demo Downlink NAS Transport to " << peerId
                 << ": s1ap=" << vepc::formatS1apProcedureCode(0x0D)
                 << ", nas=" << vepc::formatNasMessageType(nasResponse.front())
-                << ", bytes=" << response.size();
+                << ", bytes=" << response.size()
+                << ", security_context=" << formatSecurityContextIdValue(context);
     log("S1AP", responseLog.str());
     return true;
 }
