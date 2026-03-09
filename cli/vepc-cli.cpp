@@ -5,15 +5,24 @@
 #include <vector>
 #include <iomanip>
 #include <cstring>
+#include <chrono>
+#include <map>
+#include <cctype>
+#include <thread>
+
+// Глобальная карта: номер в таблице -> индекс в g_ifaces
+std::map<int, size_t> iface_num_to_idx;
 
 #ifndef _WIN32
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
+#include <cstdio>
 #else
 #define _WINSOCK_DEPRECATED_NO_WARNINGS
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <io.h>
 #endif
 
 #ifdef _WIN32
@@ -32,6 +41,7 @@
 #define CYAN "\033[1;36m"
 #define GRN  "\033[1;32m"
 #define YEL  "\033[1;33m"
+#define BLU  "\033[1;34m"
 #define RED  "\033[1;31m"
 #define WHT  "\033[0;37m"
 #define DIM  "\033[2m"
@@ -47,10 +57,869 @@ struct Interface {
 };
 static std::vector<Interface> g_ifaces;
 
+struct InterfaceOverviewRow {
+    std::string name;
+    std::string proto;
+    std::string address;
+    std::string admin;
+    std::string oper;
+    std::string implementation;
+    std::string peer;
+    bool        valid = false;
+};
+
+struct InterfaceStatusEntry {
+    std::string name;
+    std::string proto;
+    std::string ip;
+    std::string port;
+    std::string admin;
+    std::string oper;
+    std::string implementation;
+    std::string peer;
+    std::string bind;
+    std::string listen;
+    std::string reason;
+    bool        valid = false;
+};
+
+static constexpr int IFACE_COL_NAME = 10;
+static constexpr int IFACE_COL_PROTO = 10;
+static constexpr int IFACE_COL_ADDR = 21;
+static constexpr int IFACE_COL_ADMIN = 6;
+static constexpr int IFACE_COL_OPER = 9;
+static constexpr int IFACE_COL_IMPL = 8;
+
 static std::string trim(const std::string& s) {
     size_t b = s.find_first_not_of(" \t\r\n");
     size_t e = s.find_last_not_of(" \t\r\n");
     return (b == std::string::npos) ? "" : s.substr(b, e - b + 1);
+}
+
+static bool startsWith(const std::string& value, const std::string& prefix) {
+    return value.rfind(prefix, 0) == 0;
+}
+
+static std::string toUpperCopy(std::string value) {
+    for (char& ch : value) {
+        ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
+    }
+    return value;
+}
+
+static bool isPeerLabel(const std::string& label) {
+    const std::string upper = toUpperCopy(trim(label));
+    return upper == "PEER" || upper == "REMOTE NE";
+}
+
+static const char* peerAccentColor() {
+    return BLU;
+}
+
+static const char* semanticColor(const std::string& value) {
+    const std::string upper = toUpperCopy(trim(value));
+    if (upper == "UP" || upper == "OK" || upper == "RUNNING" || upper == "IMPLEMENTED" || upper == "YES") {
+        return GRN;
+    }
+    if (upper == "DOWN" || upper == "FAILED" || upper == "NO" || upper == "ERROR"
+        || upper == "N/A" || upper == "NOT OK" || upper == "NOT_OK" || upper == "NOT-OK") {
+        return RED;
+    }
+    if (upper == "DEGRADED" || upper == "PENDING" || upper == "BLOCKED" || upper == "DISABLED") {
+        return YEL;
+    }
+    if (upper == "PLANNED" || upper == "STOPPED" || upper == "UNKNOWN") {
+        return MAG;
+    }
+    return WHT;
+}
+
+static void printSemanticValue(const std::string& value) {
+    std::cout << semanticColor(value) << value << RST;
+}
+
+static void printPrompt(const std::string& promptText = "> ") {
+    std::cout << BOLD << GRN << promptText << RST;
+}
+
+static void printLocalInfo(const std::string& message) {
+    std::cout << CYAN << message << RST << "\n";
+}
+
+static void printLocalWarning(const std::string& message) {
+    std::cout << YEL << message << RST << "\n";
+}
+
+static void printLocalError(const std::string& message) {
+    std::cout << BOLD << RED << message << RST << "\n";
+}
+
+static void printLocalBanner(const std::string& label, const std::string& value) {
+    std::cout << "\n" << BOLD << CYAN << label << RST << " " << BOLD << GRN << value << RST << "\n";
+}
+
+static void printServerBlockHeader(const std::string& sourceCommand);
+static void printServerBlockFooter();
+
+static void printSectionTitle(const std::string& title, int tableWidth) {
+    const int len = static_cast<int>(title.size());
+    int pad = (tableWidth - len) / 2;
+    if (pad < 0) {
+        pad = 0;
+    }
+    std::cout << "\n" << BOLD << MAG << std::string(static_cast<size_t>(pad), ' ') << title << RST << "\n";
+}
+
+static std::string compactImplementation(const std::string& value) {
+    const std::string upper = toUpperCopy(trim(value));
+    if (upper == "IMPLEMENTED") {
+        return "IMPL";
+    }
+    if (upper == "PLANNED") {
+        return "PLAN";
+    }
+    return value;
+}
+
+static void printCompactInterfaceHeader() {
+    std::cout << DIM
+              << std::left
+              << std::setw(IFACE_COL_NAME) << "Name"
+              << std::setw(IFACE_COL_PROTO) << "Proto"
+              << std::setw(IFACE_COL_ADDR) << "Address"
+              << std::setw(IFACE_COL_ADMIN) << "Adm"
+              << std::setw(IFACE_COL_OPER) << "Oper"
+              << std::setw(IFACE_COL_IMPL) << "Impl"
+              << "Peer"
+              << RST << "\n";
+    std::cout << DIM << std::string(IFACE_COL_NAME + IFACE_COL_PROTO + IFACE_COL_ADDR + IFACE_COL_ADMIN + IFACE_COL_OPER + IFACE_COL_IMPL + 4, '-') << RST << "\n";
+}
+
+static bool isInteractiveSession() {
+#ifdef _WIN32
+    return _isatty(_fileno(stdin)) != 0;
+#else
+    return isatty(fileno(stdin)) != 0;
+#endif
+}
+
+static InterfaceOverviewRow parseInterfaceOverviewRow(const std::string& line) {
+    InterfaceOverviewRow row;
+    if (line.size() < 86) {
+        return row;
+    }
+
+    row.name = trim(line.substr(0, 12));
+    row.proto = trim(line.substr(12, 12));
+    row.address = trim(line.substr(24, 22));
+    row.admin = trim(line.substr(46, 12));
+    row.oper = trim(line.substr(58, 12));
+    row.implementation = trim(line.substr(70, 16));
+    row.peer = trim(line.substr(86));
+    row.valid = !row.name.empty() && !row.proto.empty() && !row.address.empty();
+    return row;
+}
+
+static void printInterfaceOverviewRow(const InterfaceOverviewRow& row) {
+    const std::string impl = compactImplementation(row.implementation);
+    std::cout << std::left
+              << GRN << std::setw(IFACE_COL_NAME) << row.name << RST
+              << WHT << std::setw(IFACE_COL_PROTO) << row.proto
+              << std::setw(IFACE_COL_ADDR) << row.address << RST
+              << semanticColor(row.admin) << std::setw(IFACE_COL_ADMIN) << row.admin << RST
+              << semanticColor(row.oper) << std::setw(IFACE_COL_OPER) << row.oper << RST
+              << semanticColor(row.implementation) << std::setw(IFACE_COL_IMPL) << impl << RST
+              << peerAccentColor() << row.peer << RST << "\n";
+}
+
+struct KeyValueEntry {
+    std::string key;
+    std::string value;
+};
+
+enum class ConfigSection {
+    Common,
+    Sgsn,
+    Mme
+};
+
+enum class InterfaceSection {
+    Common,
+    Sgsn,
+    Mme
+};
+
+static std::string toLowerCopy(std::string value) {
+    for (char& ch : value) {
+        ch = static_cast<char>(tolower(static_cast<unsigned char>(ch)));
+    }
+    return value;
+}
+
+static bool isShowConfigCommand(const std::string& cmd) {
+    return toLowerCopy(trim(cmd)) == "show config";
+}
+
+static bool isShowIfaceCommand(const std::string& cmd) {
+    const std::string normalized = toLowerCopy(trim(cmd));
+    return normalized == "show iface" || normalized == "show interface";
+}
+
+static ConfigSection classifyConfigEntry(const std::string& key) {
+    const std::string normalized = toLowerCopy(trim(key));
+
+    if (normalized == "mcc"
+        || normalized == "mnc"
+        || normalized == "gtp-c-port"
+        || normalized == "gtp-u-port"
+        || normalized == "mme-ip"
+        || normalized == "sgsn-ip"
+        || normalized == "s1ap-port") {
+        return ConfigSection::Common;
+    }
+
+    if (startsWith(normalized, "gb-")
+        || startsWith(normalized, "gn-")
+        || normalized == "iups-enabled"
+        || normalized == "sgsn-code") {
+        return ConfigSection::Sgsn;
+    }
+
+    return ConfigSection::Mme;
+}
+
+static InterfaceSection classifyInterfaceEntry(const std::string& name) {
+    const std::string normalized = toUpperCopy(trim(name));
+    if (startsWith(normalized, "G")) {
+        return InterfaceSection::Sgsn;
+    }
+    if (startsWith(normalized, "S")) {
+        return InterfaceSection::Mme;
+    }
+    return InterfaceSection::Common;
+}
+
+static bool tryParseKeyValueLine(const std::string& line, KeyValueEntry& entry) {
+    const std::string trimmed = trim(line);
+    if (trimmed.empty()) {
+        return false;
+    }
+
+    size_t separatorPos = trimmed.find(" = ");
+    size_t separatorWidth = 3;
+    if (separatorPos == std::string::npos) {
+        separatorPos = trimmed.find(':');
+        separatorWidth = 1;
+    }
+    if (separatorPos == std::string::npos) {
+        return false;
+    }
+
+    entry.key = trim(trimmed.substr(0, separatorPos));
+    entry.value = trim(trimmed.substr(separatorPos + separatorWidth));
+    return !entry.key.empty();
+}
+
+static void printTableRule(size_t keyWidth, size_t valueWidth) {
+    std::cout << DIM << "+-" << std::string(keyWidth, '-') << "-+-"
+              << std::string(valueWidth, '-') << "-+" << RST << "\n";
+}
+
+static void printTableCell(const std::string& text, size_t width, const char* color) {
+    std::cout << color << std::left << std::setw(static_cast<int>(width)) << text << RST;
+}
+
+static void printTableSectionRow(const std::string& title, size_t keyWidth, size_t valueWidth) {
+    const size_t totalWidth = keyWidth + valueWidth + 3;
+    std::cout << DIM << "| " << RST;
+    printTableCell(title, totalWidth, MAG);
+    std::cout << DIM << " |" << RST << "\n";
+}
+
+static void printGroupedConfigTable(const std::vector<KeyValueEntry>& entries) {
+    if (entries.empty()) {
+        return;
+    }
+
+    std::vector<KeyValueEntry> commonEntries;
+    std::vector<KeyValueEntry> sgsnEntries;
+    std::vector<KeyValueEntry> mmeEntries;
+
+    size_t keyWidth = std::string("Key").size();
+    size_t valueWidth = std::string("Value").size();
+    for (const auto& entry : entries) {
+        keyWidth = (std::max)(keyWidth, entry.key.size());
+        valueWidth = (std::max)(valueWidth, entry.value.size());
+
+        switch (classifyConfigEntry(entry.key)) {
+        case ConfigSection::Common:
+            commonEntries.push_back(entry);
+            break;
+        case ConfigSection::Sgsn:
+            sgsnEntries.push_back(entry);
+            break;
+        case ConfigSection::Mme:
+            mmeEntries.push_back(entry);
+            break;
+        }
+    }
+
+    auto printRows = [&](const std::vector<KeyValueEntry>& sectionEntries) {
+        for (const auto& entry : sectionEntries) {
+            std::cout << DIM << "| " << RST;
+            printTableCell(entry.key, keyWidth, CYAN);
+            std::cout << DIM << " | " << RST;
+            printTableCell(entry.value, valueWidth, isPeerLabel(entry.key) ? peerAccentColor() : semanticColor(entry.value));
+            std::cout << DIM << " |" << RST << "\n";
+        }
+    };
+
+    printTableRule(keyWidth, valueWidth);
+    std::cout << DIM << "| " << RST;
+    printTableCell("Key", keyWidth, CYAN);
+    std::cout << DIM << " | " << RST;
+    printTableCell("Value", valueWidth, CYAN);
+    std::cout << DIM << " |" << RST << "\n";
+    printTableRule(keyWidth, valueWidth);
+
+    const auto printSection = [&](const std::string& title, const std::vector<KeyValueEntry>& sectionEntries) {
+        if (sectionEntries.empty()) {
+            return;
+        }
+        printTableSectionRow(title, keyWidth, valueWidth);
+        printTableRule(keyWidth, valueWidth);
+        printRows(sectionEntries);
+        printTableRule(keyWidth, valueWidth);
+    };
+
+    printSection("COMMON", commonEntries);
+    printSection("SGSN", sgsnEntries);
+    printSection("MME", mmeEntries);
+}
+
+static InterfaceStatusEntry makeInterfaceStatusEntry(const InterfaceOverviewRow& row) {
+    InterfaceStatusEntry entry;
+    const size_t separatorPos = row.address.rfind(':');
+    entry.name = row.name;
+    entry.proto = row.proto;
+    if (separatorPos == std::string::npos) {
+        entry.ip = row.address;
+        entry.port = "-";
+    } else {
+        entry.ip = trim(row.address.substr(0, separatorPos));
+        entry.port = trim(row.address.substr(separatorPos + 1));
+    }
+    entry.admin = row.admin;
+    entry.oper = row.oper;
+    entry.implementation = compactImplementation(row.implementation);
+    entry.peer = row.peer;
+    entry.bind = "?";
+    entry.listen = "?";
+    entry.valid = row.valid;
+    return entry;
+}
+
+static void applyDiagToInterfaceStatus(InterfaceStatusEntry& entry, const std::string& line) {
+    const size_t diagPos = line.find("diag:");
+    if (diagPos == std::string::npos) {
+        return;
+    }
+
+    std::string remaining = trim(line.substr(diagPos + std::string("diag:").size()));
+    std::istringstream diagStream(remaining);
+    std::string segment;
+    while (std::getline(diagStream, segment, ';')) {
+        segment = trim(segment);
+        const size_t equals = segment.find('=');
+        if (equals == std::string::npos) {
+            continue;
+        }
+
+        const std::string key = trim(segment.substr(0, equals));
+        const std::string value = trim(segment.substr(equals + 1));
+        const size_t reasonPos = value.find(" (");
+        const std::string state = (reasonPos == std::string::npos || value.empty() || value.back() != ')')
+            ? value
+            : value.substr(0, reasonPos);
+
+        if (key == "bind") {
+            entry.bind = state;
+        } else if (key == "listen") {
+            entry.listen = state;
+        } else if (key == "reason") {
+            entry.reason = value;
+        }
+    }
+}
+
+static void printGroupedInterfaceTable(const std::vector<InterfaceStatusEntry>& entries) {
+    if (entries.empty()) {
+        return;
+    }
+
+    std::vector<InterfaceStatusEntry> commonEntries;
+    std::vector<InterfaceStatusEntry> sgsnEntries;
+    std::vector<InterfaceStatusEntry> mmeEntries;
+
+    size_t nameWidth = std::string("Name").size();
+    size_t protoWidth = std::string("Proto").size();
+    size_t ipWidth = std::string("IP").size();
+    size_t portWidth = std::string("Port").size();
+    size_t adminWidth = std::string("Adm").size();
+    size_t operWidth = std::string("Oper").size();
+    size_t implWidth = std::string("Impl").size();
+    size_t peerWidth = std::string("Peer").size();
+    size_t bindWidth = std::string("Bind").size();
+    size_t listenWidth = std::string("Listen").size();
+    size_t reasonWidth = std::string("Reason").size();
+
+    for (const auto& entry : entries) {
+        nameWidth = (std::max)(nameWidth, entry.name.size());
+        protoWidth = (std::max)(protoWidth, entry.proto.size());
+        ipWidth = (std::max)(ipWidth, entry.ip.size());
+        portWidth = (std::max)(portWidth, entry.port.size());
+        adminWidth = (std::max)(adminWidth, entry.admin.size());
+        operWidth = (std::max)(operWidth, entry.oper.size());
+        implWidth = (std::max)(implWidth, entry.implementation.size());
+        peerWidth = (std::max)(peerWidth, entry.peer.size());
+        bindWidth = (std::max)(bindWidth, entry.bind.size());
+        listenWidth = (std::max)(listenWidth, entry.listen.size());
+        reasonWidth = (std::max)(reasonWidth, entry.reason.size());
+
+        switch (classifyInterfaceEntry(entry.name)) {
+        case InterfaceSection::Common:
+            commonEntries.push_back(entry);
+            break;
+        case InterfaceSection::Sgsn:
+            sgsnEntries.push_back(entry);
+            break;
+        case InterfaceSection::Mme:
+            mmeEntries.push_back(entry);
+            break;
+        }
+    }
+
+    const auto printOverviewRule = [&]() {
+        std::cout << DIM
+                  << "+-" << std::string(nameWidth, '-')
+                  << "-+-" << std::string(protoWidth, '-')
+                  << "-+-" << std::string(ipWidth, '-')
+                  << "-+-" << std::string(portWidth, '-')
+                  << "-+-" << std::string(adminWidth, '-')
+                  << "-+-" << std::string(operWidth, '-')
+                  << "-+-" << std::string(implWidth, '-')
+                  << "-+-" << std::string(peerWidth, '-')
+                  << "-+" << RST << "\n";
+    };
+
+    const size_t overviewWidth = nameWidth + protoWidth + ipWidth + portWidth + adminWidth + operWidth + implWidth + peerWidth + 21;
+    const size_t diagWidth = nameWidth + bindWidth + listenWidth + reasonWidth + 9;
+    const size_t diagReasonWidth = reasonWidth + (overviewWidth - diagWidth);
+
+    const auto printDiagRule = [&]() {
+        std::cout << DIM
+                  << "+-" << std::string(nameWidth, '-')
+                  << "-+-" << std::string(bindWidth, '-')
+                  << "-+-" << std::string(listenWidth, '-')
+                  << "-+-" << std::string(diagReasonWidth, '-')
+                  << "-+" << RST << "\n";
+    };
+
+    const auto printSectionBanner = [&](const std::string& title, size_t totalWidth) {
+        std::cout << DIM << "| " << RST;
+        printTableCell(title, totalWidth, CYAN);
+        std::cout << DIM << " |" << RST << "\n";
+    };
+
+    const auto printOverviewHeader = [&]() {
+        std::cout << DIM << "| " << RST;
+        printTableCell("Name", nameWidth, CYAN);
+        std::cout << DIM << " | " << RST;
+        printTableCell("Proto", protoWidth, CYAN);
+        std::cout << DIM << " | " << RST;
+        printTableCell("IP", ipWidth, CYAN);
+        std::cout << DIM << " | " << RST;
+        printTableCell("Port", portWidth, CYAN);
+        std::cout << DIM << " | " << RST;
+        printTableCell("Adm", adminWidth, CYAN);
+        std::cout << DIM << " | " << RST;
+        printTableCell("Oper", operWidth, CYAN);
+        std::cout << DIM << " | " << RST;
+        printTableCell("Impl", implWidth, CYAN);
+        std::cout << DIM << " | " << RST;
+        printTableCell("Peer", peerWidth, CYAN);
+        std::cout << DIM << " |" << RST << "\n";
+    };
+
+    const auto printDiagHeader = [&]() {
+        std::cout << DIM << "| " << RST;
+        printTableCell("Name", nameWidth, CYAN);
+        std::cout << DIM << " | " << RST;
+        printTableCell("Bind", bindWidth, CYAN);
+        std::cout << DIM << " | " << RST;
+        printTableCell("Listen", listenWidth, CYAN);
+        std::cout << DIM << " | " << RST;
+        printTableCell("Reason", diagReasonWidth, CYAN);
+        std::cout << DIM << " |" << RST << "\n";
+    };
+
+    const auto printOverviewEntry = [&](const InterfaceStatusEntry& entry) {
+        std::cout << DIM << "| " << RST;
+        printTableCell(entry.name, nameWidth, GRN);
+        std::cout << DIM << " | " << RST;
+        printTableCell(entry.proto, protoWidth, WHT);
+        std::cout << DIM << " | " << RST;
+        printTableCell(entry.ip, ipWidth, WHT);
+        std::cout << DIM << " | " << RST;
+        printTableCell(entry.port, portWidth, WHT);
+        std::cout << DIM << " | " << RST;
+        printTableCell(entry.admin, adminWidth, semanticColor(entry.admin));
+        std::cout << DIM << " | " << RST;
+        printTableCell(entry.oper, operWidth, semanticColor(entry.oper));
+        std::cout << DIM << " | " << RST;
+        printTableCell(entry.implementation, implWidth, semanticColor(entry.implementation));
+        std::cout << DIM << " | " << RST;
+        printTableCell(entry.peer, peerWidth, peerAccentColor());
+        std::cout << DIM << " |" << RST << "\n";
+    };
+
+    const auto printDiagEntry = [&](const InterfaceStatusEntry& entry) {
+        std::cout << DIM << "| " << RST;
+        printTableCell(entry.name, nameWidth, GRN);
+        std::cout << DIM << " | " << RST;
+        printTableCell(entry.bind, bindWidth, semanticColor(entry.bind));
+        std::cout << DIM << " | " << RST;
+        printTableCell(entry.listen, listenWidth, semanticColor(entry.listen));
+        std::cout << DIM << " | " << RST;
+        printTableCell(entry.reason, diagReasonWidth, semanticColor(entry.reason));
+        std::cout << DIM << " |" << RST << "\n";
+    };
+
+    const auto printSection = [&](const std::string& title, const std::vector<InterfaceStatusEntry>& sectionEntries) {
+        if (sectionEntries.empty()) {
+            return;
+        }
+        printOverviewRule();
+        printSectionBanner(title, overviewWidth);
+        printOverviewRule();
+        printOverviewHeader();
+        printOverviewRule();
+        for (const auto& entry : sectionEntries) {
+            printOverviewEntry(entry);
+        }
+        printOverviewRule();
+        printDiagRule();
+        printSectionBanner(title + " DIAG", overviewWidth);
+        printDiagRule();
+        printDiagHeader();
+        printDiagRule();
+        for (const auto& entry : sectionEntries) {
+            printDiagEntry(entry);
+        }
+        printDiagRule();
+    };
+
+    printSection("COMMON", commonEntries);
+    printSection("SGSN", sgsnEntries);
+    printSection("MME", mmeEntries);
+}
+
+static void printKeyValueTable(const std::vector<KeyValueEntry>& entries) {
+    if (entries.empty()) {
+        return;
+    }
+
+    size_t keyWidth = std::string("Key").size();
+    size_t valueWidth = std::string("Value").size();
+    for (const auto& entry : entries) {
+        keyWidth = (std::max)(keyWidth, entry.key.size());
+        valueWidth = (std::max)(valueWidth, entry.value.size());
+    }
+
+    printTableRule(keyWidth, valueWidth);
+    std::cout << DIM << "| " << RST;
+    printTableCell("Key", keyWidth, CYAN);
+    std::cout << DIM << " | " << RST;
+    printTableCell("Value", valueWidth, CYAN);
+    std::cout << DIM << " |" << RST << "\n";
+    printTableRule(keyWidth, valueWidth);
+
+    for (const auto& entry : entries) {
+        std::cout << DIM << "| " << RST;
+        printTableCell(entry.key, keyWidth, CYAN);
+        std::cout << DIM << " | " << RST;
+        printTableCell(entry.value, valueWidth, isPeerLabel(entry.key) ? peerAccentColor() : semanticColor(entry.value));
+        std::cout << DIM << " |" << RST << "\n";
+    }
+
+    printTableRule(keyWidth, valueWidth);
+}
+
+static void printKeyValueLine(const std::string& key, const std::string& value) {
+    std::cout << CYAN << key << RST << DIM << " : " << RST;
+    printSemanticValue(value);
+    std::cout << "\n";
+}
+
+static void printStatusSummary(const std::string& value) {
+    std::istringstream ss(value);
+    std::string part;
+    bool first = true;
+    while (std::getline(ss, part, '|')) {
+        part = trim(part);
+        const size_t colon = part.find(':');
+        if (!first) {
+            std::cout << DIM << " | " << RST;
+        }
+        first = false;
+        if (colon == std::string::npos) {
+            printSemanticValue(part);
+            continue;
+        }
+        const std::string subKey = trim(part.substr(0, colon));
+        const std::string subValue = trim(part.substr(colon + 1));
+        std::cout << YEL << subKey << RST << DIM << ": " << RST;
+        printSemanticValue(subValue);
+    }
+    std::cout << "\n";
+}
+
+static void printInterfaceDiagLine(const std::string& line) {
+    const size_t diagPos = line.find("diag:");
+    const std::string rowPart = trim(diagPos == std::string::npos ? line : line.substr(0, diagPos));
+    const std::string diagPart = diagPos == std::string::npos ? "" : trim(line.substr(diagPos));
+
+    if (!rowPart.empty()) {
+        const InterfaceOverviewRow row = parseInterfaceOverviewRow(rowPart);
+        if (row.valid) {
+            printInterfaceOverviewRow(row);
+        }
+    }
+
+    if (!diagPart.empty()) {
+        std::cout << DIM << "  diag " << RST;
+        std::string remaining = diagPart.substr(std::string("diag:").size());
+        std::istringstream diagStream(remaining);
+        std::string segment;
+        std::string bindState;
+        std::string listenState;
+        std::string reasonState;
+        bool first = true;
+        while (std::getline(diagStream, segment, ';')) {
+            segment = trim(segment);
+            first = false;
+
+            const size_t equals = segment.find('=');
+            if (equals == std::string::npos) {
+                continue;
+            }
+
+            const std::string key = trim(segment.substr(0, equals));
+            const std::string value = trim(segment.substr(equals + 1));
+            const size_t reasonPos = value.find(" (");
+            const std::string state = (reasonPos == std::string::npos || value.back() != ')')
+                ? value
+                : value.substr(0, reasonPos);
+
+            if (key == "bind") {
+                bindState = state;
+            } else if (key == "listen") {
+                listenState = state;
+            } else if (key == "reason") {
+                reasonState = value;
+            }
+        }
+
+        std::cout << CYAN << "b=" << RST;
+        printSemanticValue(bindState.empty() ? "?" : bindState);
+        std::cout << DIM << "  " << RST << CYAN << "l=" << RST;
+        printSemanticValue(listenState.empty() ? "?" : listenState);
+        if (!reasonState.empty()) {
+            std::cout << DIM << "  " << RST << CYAN << "r=" << RST << WHT << reasonState << RST;
+        }
+    } else {
+        std::cout << WHT << line << RST;
+    }
+
+    std::cout << "\n";
+}
+
+static void printServerResponse(const std::string& response, const std::string& sourceCommand = "") {
+    if (trim(response).empty()) {
+        return;
+    }
+
+    printServerBlockHeader(sourceCommand);
+
+    if (isShowConfigCommand(sourceCommand)) {
+        std::istringstream configStream(response);
+        std::string configLine;
+        std::vector<KeyValueEntry> configEntries;
+        while (std::getline(configStream, configLine)) {
+            if (!configLine.empty() && configLine.back() == '\r') {
+                configLine.pop_back();
+            }
+
+            KeyValueEntry entry;
+            if (tryParseKeyValueLine(configLine, entry)) {
+                configEntries.push_back(entry);
+            }
+        }
+
+        printGroupedConfigTable(configEntries);
+        printServerBlockFooter();
+        return;
+    }
+
+    if (isShowIfaceCommand(sourceCommand)) {
+        std::istringstream ifaceStream(response);
+        std::string ifaceLine;
+        std::vector<InterfaceStatusEntry> ifaceEntries;
+        while (std::getline(ifaceStream, ifaceLine)) {
+            if (!ifaceLine.empty() && ifaceLine.back() == '\r') {
+                ifaceLine.pop_back();
+            }
+
+            const std::string trimmed = trim(ifaceLine);
+            if (trimmed.empty()) {
+                continue;
+            }
+            if ((startsWith(trimmed, "Name") && trimmed.find("Proto") != std::string::npos)
+                || startsWith(trimmed, "----")) {
+                continue;
+            }
+            if (trimmed.find("diag:") != std::string::npos) {
+                if (!ifaceEntries.empty()) {
+                    applyDiagToInterfaceStatus(ifaceEntries.back(), trimmed);
+                }
+                continue;
+            }
+
+            const InterfaceOverviewRow row = parseInterfaceOverviewRow(ifaceLine);
+            if (row.valid) {
+                ifaceEntries.push_back(makeInterfaceStatusEntry(row));
+            }
+        }
+
+        printGroupedInterfaceTable(ifaceEntries);
+        printServerBlockFooter();
+        return;
+    }
+
+    std::istringstream stream(response);
+    std::string line;
+    std::vector<KeyValueEntry> keyValueTable;
+
+    const auto flushKeyValueTable = [&]() {
+        if (keyValueTable.empty()) {
+            return;
+        }
+        printKeyValueTable(keyValueTable);
+        keyValueTable.clear();
+    };
+
+    while (std::getline(stream, line)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+
+        const std::string trimmed = trim(line);
+        if (trimmed.empty()) {
+            flushKeyValueTable();
+            std::cout << "\n";
+            continue;
+        }
+
+        if (startsWith(trimmed, "vEPC restart requested")) {
+            flushKeyValueTable();
+            std::cout << BOLD << YEL << trimmed << RST << "\n";
+            continue;
+        }
+
+        if (startsWith(trimmed, "Interface ") && trimmed.find(" status:") != std::string::npos) {
+            flushKeyValueTable();
+            std::cout << BOLD << MAG << trimmed << RST << "\n";
+            continue;
+        }
+
+        if (trimmed.find("diag: bind=") != std::string::npos) {
+            flushKeyValueTable();
+            printInterfaceDiagLine(trimmed);
+            continue;
+        }
+
+        if (startsWith(line, "  ")) {
+            const std::string indented = trim(line);
+            const size_t colonPos = indented.find(':');
+            if (colonPos != std::string::npos) {
+                const std::string key = trim(indented.substr(0, colonPos));
+                const std::string value = trim(indented.substr(colonPos + 1));
+                keyValueTable.push_back({key, value});
+                continue;
+            }
+        }
+
+        const InterfaceOverviewRow overviewRow = parseInterfaceOverviewRow(line);
+        if (overviewRow.valid) {
+            flushKeyValueTable();
+            printInterfaceOverviewRow(overviewRow);
+            continue;
+        }
+
+        if ((startsWith(trimmed, "Name") && trimmed.find("Proto") != std::string::npos)
+            || startsWith(trimmed, "----")) {
+            flushKeyValueTable();
+            if (startsWith(trimmed, "Name") && trimmed.find("Proto") != std::string::npos) {
+                printCompactInterfaceHeader();
+            }
+            continue;
+        }
+
+        const size_t eqPos = trimmed.find(" = ");
+        if (eqPos != std::string::npos) {
+            const std::string key = trim(trimmed.substr(0, eqPos));
+            const std::string value = trim(trimmed.substr(eqPos + 3));
+            keyValueTable.push_back({key, value});
+            continue;
+        }
+
+        const size_t colonPos = trimmed.find(':');
+        if (colonPos != std::string::npos) {
+            const std::string key = trim(trimmed.substr(0, colonPos));
+            const std::string value = trim(trimmed.substr(colonPos + 1));
+            if (key == "Current Status") {
+                flushKeyValueTable();
+                std::cout << CYAN << key << RST << DIM << " : " << RST;
+                printStatusSummary(value);
+            } else {
+                keyValueTable.push_back({key, value});
+            }
+            continue;
+        }
+
+        if (startsWith(trimmed, "[") && trimmed.find(']') != std::string::npos) {
+            flushKeyValueTable();
+            const size_t end = trimmed.find(']');
+            std::cout << MAG << trimmed.substr(0, end + 1) << RST;
+            if (end + 1 < trimmed.size()) {
+                std::cout << " " << WHT << trim(trimmed.substr(end + 1)) << RST;
+            }
+            std::cout << "\n";
+            continue;
+        }
+
+        if (trimmed.find("failed") != std::string::npos || trimmed.find("not running") != std::string::npos) {
+            flushKeyValueTable();
+            std::cout << RED << trimmed << RST << "\n";
+            continue;
+        }
+
+        flushKeyValueTable();
+        std::cout << WHT << trimmed << RST << "\n";
+    }
+
+    flushKeyValueTable();
+    printServerBlockFooter();
 }
 
 static void loadInterfaces() {
@@ -93,7 +962,7 @@ static void loadInterfaces() {
 }
 
 static void printIfaceTableCustom(const std::vector<size_t>& idxs, int& num) {
-    const int wN = 3, wI = 12, wP = 16, wIP = 16, wPort = 7, wR = 14;
+    const int wN = 3, wI = 12, wP = 8, wIP = 14, wPort = 6, wR = 16;
     auto hline = [&]() {
         auto seg = [](int w){ for(int i=0;i<w+2;i++) std::cout<<"-"; };
         std::cout << "+"; seg(wN); std::cout << "+";
@@ -115,7 +984,7 @@ static void printIfaceTableCustom(const std::vector<size_t>& idxs, int& num) {
         cell(p, wP, hdr, hdr ? CYAN : WHT);
         cell(ip, wIP, hdr, hdr ? CYAN : WHT);
         cell(port, wPort, hdr, hdr ? CYAN : WHT);
-        cell(r, wR, hdr, hdr ? CYAN : WHT);
+        cell(r, wR, hdr, hdr ? CYAN : peerAccentColor());
         std::cout << "\n";
     };
     hline();
@@ -136,44 +1005,48 @@ static void printHelp() {
         {"exit", "-", "-", "-", "Exit CLI"},
         {"help", "-", "-", "-", "Show help"},
         {"show config", "-", "-", "-", "Show config"},
-        {"show iface", "-", "-", "-", "Show interfaces"},
+        {"show interface", "-", "-", "-", "Show interfaces"},
         {"restart", "-", "-", "-", "Restart server"},
         {"log", "-", "-", "-", "Show log"}
     };
-    auto printCenteredTitle = [](const std::string& title, int tableWidth) {
-        int len = static_cast<int>(title.size());
-        int pad = (tableWidth - len) / 2;
-        if (pad < 0) pad = 0;
-        std::cout << "\n" << BOLD << MAG << std::string(pad, ' ') << title << RST << "\n";
-    };
     auto printCliTable = [&]() {
-        const int wN = 3, wI = 12, wP = 16, wIP = 16, wPort = 7, wR = 14;
+        const int wN = 3, wI = 12, wP = 8, wIP = 14, wPort = 6, wR = 16;
         int tableWidth = wN + wI + wP + wIP + wPort + wR + 6 * 3 + 7; // 6 columns, 7 borders
         auto hline = [&]() {
             auto seg = [](int w){ for(int i=0;i<w+2;i++) std::cout<<"-"; };
-            std::cout << "+"; seg(wN); std::cout << "+";
-                            seg(wI); std::cout << "+";
-                            seg(wP); std::cout << "+";
-                            seg(wIP); std::cout << "+";
-                            seg(wPort); std::cout << "+";
-                            seg(wR); std::cout << "+\n";
+            std::cout << DIM << "+"; seg(wN); std::cout << "+";
+            seg(wI); std::cout << "+";
+            seg(wP); std::cout << "+";
+            seg(wIP); std::cout << "+";
+            seg(wPort); std::cout << "+";
+            seg(wR); std::cout << "+\n" << RST;
+        };
+        auto titleRow = [&](const std::string& title) {
+            const int innerWidth = tableWidth - 4;
+            const int titleLen = static_cast<int>(title.size());
+            const int leftPad = innerWidth > titleLen ? (innerWidth - titleLen) / 2 : 0;
+            const int rightPad = innerWidth > titleLen ? innerWidth - titleLen - leftPad : 0;
+            std::cout << DIM << "| " << RST
+                      << BOLD << CYAN << std::string(static_cast<size_t>(leftPad), ' ') << title
+                      << std::string(static_cast<size_t>(rightPad), ' ') << RST
+                      << DIM << " |" << RST << "\n";
         };
         auto row = [&](const std::string& n, const std::string& i,
                        const std::string& p, const std::string& ip,
                        const std::string& port, const std::string& r, bool hdr = false, bool isExit = false) {
             auto cell = [&](const std::string& v, int w, bool h, const char* color = WHT) {
-                std::cout << " " << color << std::left << std::setw(w) << v << RST << " |";
+                std::cout << DIM << "| " << RST << color << std::left << std::setw(w) << v << RST << " ";
             };
-            std::cout << "|";
             cell(n, wN, hdr, hdr ? CYAN : WHT);
             cell(i, wI, hdr, hdr ? CYAN : (isExit ? RED : GRN));
             cell(p, wP, hdr, hdr ? CYAN : WHT);
             cell(ip, wIP, hdr, hdr ? CYAN : WHT);
             cell(port, wPort, hdr, hdr ? CYAN : WHT);
-            cell(r, wR, hdr, hdr ? CYAN : WHT);
-            std::cout << "\n";
+            cell(r, wR, hdr, hdr ? CYAN : peerAccentColor());
+            std::cout << DIM << "|" << RST << "\n";
         };
-        printCenteredTitle("==================== CLI COMMANDS =======================", tableWidth);
+        hline();
+        titleRow("CLI COMMANDS");
         hline();
         row("No", "Name", "Protocol", "IP", "Port", "Remote NE", true);
         hline();
@@ -199,61 +1072,83 @@ static void printHelp() {
             mme_idx.push_back(i);
         }
     }
-    int iface_num = static_cast<int>(cli_cmds.size());
-    auto printIfaceTableCustomCentered = [&](const std::vector<size_t>& idxs, int& num, const std::string& title) {
-        const int wN = 3, wI = 12, wP = 16, wIP = 16, wPort = 7, wR = 14;
+    // Глобальная карта: номер в таблице -> индекс в g_ifaces
+    iface_num_to_idx.clear();
+    auto printIfaceTableCustomCentered = [&](const std::vector<size_t>& idxs, int startNum, const std::string& title) {
+        const int wN = 3, wI = 12, wP = 8, wIP = 14, wPort = 6, wR = 16;
         int tableWidth = wN + wI + wP + wIP + wPort + wR + 6 * 3 + 7;
-        printCenteredTitle(title, tableWidth);
         auto hline = [&]() {
             auto seg = [](int w){ for(int i=0;i<w+2;i++) std::cout<<"-"; };
-            std::cout << "+"; seg(wN); std::cout << "+";
-                            seg(wI); std::cout << "+";
-                            seg(wP); std::cout << "+";
-                            seg(wIP); std::cout << "+";
-                            seg(wPort); std::cout << "+";
-                            seg(wR); std::cout << "+\n";
+            std::cout << DIM << "+"; seg(wN); std::cout << "+";
+            seg(wI); std::cout << "+";
+            seg(wP); std::cout << "+";
+            seg(wIP); std::cout << "+";
+            seg(wPort); std::cout << "+";
+            seg(wR); std::cout << "+\n" << RST;
+        };
+        auto titleRow = [&](const std::string& sectionTitle) {
+            const int innerWidth = tableWidth - 4;
+            const int titleLen = static_cast<int>(sectionTitle.size());
+            const int leftPad = innerWidth > titleLen ? (innerWidth - titleLen) / 2 : 0;
+            const int rightPad = innerWidth > titleLen ? innerWidth - titleLen - leftPad : 0;
+            std::cout << DIM << "| " << RST
+                      << BOLD << CYAN << std::string(static_cast<size_t>(leftPad), ' ') << sectionTitle
+                      << std::string(static_cast<size_t>(rightPad), ' ') << RST
+                      << DIM << " |" << RST << "\n";
         };
         auto row = [&](const std::string& n, const std::string& i,
                        const std::string& p, const std::string& ip,
                        const std::string& port, const std::string& r, bool hdr = false) {
             auto cell = [&](const std::string& v, int w, bool h, const char* color = WHT) {
-                std::cout << " " << color << std::left << std::setw(w) << v << RST << " |";
+                std::cout << DIM << "| " << RST << color << std::left << std::setw(w) << v << RST << " ";
             };
-            std::cout << "|";
             cell(n, wN, hdr, hdr ? CYAN : WHT);
             cell(i, wI, hdr, hdr ? CYAN : GRN);
             cell(p, wP, hdr, hdr ? CYAN : WHT);
             cell(ip, wIP, hdr, hdr ? CYAN : WHT);
             cell(port, wPort, hdr, hdr ? CYAN : WHT);
-            cell(r, wR, hdr, hdr ? CYAN : WHT);
-            std::cout << "\n";
+            cell(r, wR, hdr, hdr ? CYAN : peerAccentColor());
+            std::cout << DIM << "|" << RST << "\n";
         };
+        hline();
+        titleRow(title);
         hline();
         row("No", "Name", "Protocol", "IP", "Port", "Remote NE", true);
         hline();
+        int num = startNum;
         for (size_t idx : idxs) {
+            iface_num_to_idx[num] = idx;
             const auto& f = g_ifaces[idx];
             row(std::to_string(num++), f.name, f.proto, f.ip, f.port, f.peer, false);
         }
         hline();
     };
-    printIfaceTableCustomCentered(sgsn_idx, iface_num, "==================== SGSN INTERFACES ====================");
-    printIfaceTableCustomCentered(mme_idx, iface_num, "==================== MME INTERFACES =====================");
+    int cli_count = static_cast<int>(cli_cmds.size());
+    printIfaceTableCustomCentered(sgsn_idx, cli_count, "SGSN INTERFACES");
+    printIfaceTableCustomCentered(mme_idx, cli_count + static_cast<int>(sgsn_idx.size()), "MME INTERFACES");
 
-    std::cout << DIM "\nConnecting to " CLI_ENDPOINT RST "\n";
-    std::cout << GRN "\n> " RST;
+    std::cout << "\n";
+    printSectionTitle("MODE COMMANDS", 72);
+    printKeyValueTable({
+        {"Exec", "configure terminal | show running-config | show logging | save"},
+        {"Config", "interface <name> | end | exit | commit"},
+        {"Interface", "shutdown | no shutdown | default | show interface <name> detail"}
+    });
+
+    std::cout << "\n" << DIM << "Connecting to " << RST << CYAN << CLI_ENDPOINT << RST << "\n\n";
+    printPrompt();
 }
 
 static void sendToServer(const std::string& cmd) {
 #ifdef _WIN32
     WSADATA wsaData{};
     if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
-        std::cout << RED "WSAStartup failed" RST "\n";
+        printLocalError("WSAStartup failed");
         return;
     }
     SOCKET sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (sock == INVALID_SOCKET) {
-        std::cout << RED "socket() failed" RST "\n";
+        printLocalError("socket() failed");
         WSACleanup();
         return;
     }
@@ -261,25 +1156,38 @@ static void sendToServer(const std::string& cmd) {
     addr.sin_family = AF_INET;
     addr.sin_port   = htons(CLI_TCP_PORT);
     if (inet_pton(AF_INET, CLI_TCP_HOST, &addr.sin_addr) != 1) {
-        std::cout << RED "inet_pton failed" RST "\n";
+        printLocalError("inet_pton failed");
         closesocket(sock);
         WSACleanup();
         return;
     }
-    if (connect(sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == SOCKET_ERROR) {
+
+    bool connected = false;
+    constexpr int kConnectRetryCount = 12;
+    for (int attempt = 0; attempt < kConnectRetryCount; ++attempt) {
+        if (connect(sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != SOCKET_ERROR) {
+            connected = true;
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    }
+
+    if (!connected) {
         closesocket(sock);
         WSACleanup();
-        std::cout << RED "Cannot connect to server. Please make sure vEPC is running." RST "\n";
+        printLocalError("Cannot connect to server. Please make sure vEPC is running.");
         return;
     }
     send(sock, cmd.c_str(), static_cast<int>(cmd.size()), 0);
+    std::string response;
     char buf[4096];
     while (true) {
         int n = recv(sock, buf, static_cast<int>(sizeof(buf) - 1), 0);
         if (n <= 0) break;
         buf[n] = '\0';
-        std::cout << buf << std::flush;
+        response.append(buf, static_cast<size_t>(n));
     }
+    printServerResponse(response, cmd);
     closesocket(sock);
     WSACleanup();
 #else
@@ -288,38 +1196,224 @@ static void sendToServer(const std::string& cmd) {
     struct sockaddr_un addr{};
     addr.sun_family = AF_UNIX;
     strncpy(addr.sun_path, CLI_SOCKET, sizeof(addr.sun_path) - 1);
-    if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+
+    bool connected = false;
+    constexpr int kConnectRetryCount = 12;
+    for (int attempt = 0; attempt < kConnectRetryCount; ++attempt) {
+        if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) == 0) {
+            connected = true;
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    }
+
+    if (!connected) {
         close(sock);
-        std::cout << RED "Cannot connect to server. Please make sure vEPC is running." RST "\n";
+        printLocalError("Cannot connect to server. Please make sure vEPC is running.");
         return;
     }
     send(sock, cmd.c_str(), cmd.size(), 0);
+    std::string response;
     char buf[4096];
     while (true) {
         ssize_t n = recv(sock, buf, sizeof(buf) - 1, 0);
         if (n <= 0) break;
         buf[n] = '\0';
-        std::cout << buf << std::flush;
+        response.append(buf, static_cast<size_t>(n));
     }
+    printServerResponse(response, cmd);
     close(sock);
 #endif
 }
 
 static void handleIface(const Interface& iface, const std::string& action) {
     if (action.empty() || action == "status") {
-        std::cout << "\n" BOLD CYAN "== Interface: " RST BOLD << iface.name << RST << "\n"
-                  << CYAN "   Protocol  : " RST << iface.proto << "\n"
-                  << CYAN "   IP        : " RST << iface.ip    << "\n"
-                  << CYAN "   Port      : " RST << iface.port  << "\n"
-                  << CYAN "   Remote NE : " RST << iface.peer  << "\n";
+        printLocalBanner("== Interface:", iface.name);
+        printKeyValueTable({
+            {"Name", iface.name},
+            {"Protocol", iface.proto},
+            {"IP", iface.ip},
+            {"Port", iface.port},
+            {"Remote NE", iface.peer}
+        });
         sendToServer("iface_status " + iface.name);
     } else if (action == "up" || action == "down" || action == "reset") {
-        std::cout << YEL "→ " RST << "iface_" << action << " " << iface.name << "\n";
+        std::cout << BOLD << YEL << "Action" << RST << DIM << " : " << RST << WHT << "iface_" << action << " " << RST << GRN << iface.name << RST << "\n";
         sendToServer("iface_" + action + " " + iface.name);
     } else {
-        std::cout << RED "Unknown action: " RST << action
-                  << "  (allowed: up, down, reset)\n";
+        std::cout << BOLD << RED << "Unknown action" << RST << DIM << ": " << RST << WHT << action << RST
+                  << DIM << "  (allowed: up, down, reset)" << RST << "\n";
     }
+}
+
+enum class CliMode {
+    Exec,
+    Config,
+    InterfaceConfig
+};
+
+static void printExecHelp() {
+    printSectionTitle("EXEC MODE", 72);
+    printKeyValueTable({
+        {"Navigation", "configure terminal | exit"},
+        {"Show", "show running-config | show logging | show interface [<name> [detail]]"},
+        {"Runtime", "status | state | restart | stop | save"},
+        {"Config", "set <key> <value>"},
+        {"Help", "help | ?"}
+    });
+}
+
+static void printConfigHelp() {
+    printSectionTitle("CONFIG MODE", 72);
+    printKeyValueTable({
+        {"Navigation", "interface <name> | end | exit"},
+        {"Runtime", "restart | stop"},
+        {"Config", "set <key> <value> | commit"},
+        {"Show", "show running-config | show logging | show interface [<name> [detail]]"},
+        {"Help", "help | ?"}
+    });
+}
+
+static void printInterfaceHelp(const std::string& ifaceName) {
+    printSectionTitle("INTERFACE MODE", 72);
+    printKeyValueTable({
+        {"Interface", ifaceName.empty() ? "interface <name>" : ifaceName},
+        {"Actions", "shutdown | no shutdown | default"},
+        {"Show", ifaceName.empty() ? "show interface <name> [detail]" : "show interface " + ifaceName + " [detail]"},
+        {"Navigation", "exit | end"},
+        {"Help", "help | ?"}
+    });
+}
+
+static void printModeHelp(CliMode mode, const std::string& ifaceName = "") {
+    if (mode == CliMode::Config) {
+        printConfigHelp();
+        return;
+    }
+    if (mode == CliMode::InterfaceConfig) {
+        printInterfaceHelp(ifaceName);
+        return;
+    }
+    printExecHelp();
+}
+
+static std::vector<std::string> splitTokens(const std::string& line) {
+    std::vector<std::string> tokens;
+    std::istringstream ss(line);
+    std::string token;
+    while (ss >> token) {
+        tokens.push_back(token);
+    }
+    return tokens;
+}
+
+static std::string promptForMode(CliMode mode, const std::string& ifaceName = "") {
+    if (mode == CliMode::Config) {
+        return "vepc(config)# ";
+    }
+    if (mode == CliMode::InterfaceConfig) {
+        return "vepc(config-if-" + ifaceName + ")# ";
+    }
+    return "vepc# ";
+}
+
+static bool isConfigureTerminalCommand(const std::vector<std::string>& tokens) {
+    if (tokens.size() == 2 && toLowerCopy(tokens[0]) == "configure" && toLowerCopy(tokens[1]) == "terminal") {
+        return true;
+    }
+    return tokens.size() == 2 && toLowerCopy(tokens[0]) == "conf" && toLowerCopy(tokens[1]) == "t";
+}
+
+static bool isShowInterfaceCommand(const std::vector<std::string>& tokens) {
+    return tokens.size() >= 2
+        && toLowerCopy(tokens[0]) == "show"
+    && (toLowerCopy(tokens[1]) == "interface" || toLowerCopy(tokens[1]) == "iface");
+}
+
+static bool isShowRunningConfigCommand(const std::vector<std::string>& tokens) {
+    return tokens.size() == 2
+        && toLowerCopy(tokens[0]) == "show"
+        && toLowerCopy(tokens[1]) == "running-config";
+}
+
+static bool isShowLoggingCommand(const std::vector<std::string>& tokens) {
+    return tokens.size() == 2
+        && toLowerCopy(tokens[0]) == "show"
+        && (toLowerCopy(tokens[1]) == "logging" || toLowerCopy(tokens[1]) == "log");
+}
+
+static std::string canonicalServerCommandLabel(const std::string& sourceCommand) {
+    const std::string trimmed = trim(sourceCommand);
+    if (trimmed.empty()) {
+        return "server output";
+    }
+    if (isShowIfaceCommand(trimmed)) {
+        return "server output: show interface";
+    }
+    if (isShowConfigCommand(trimmed)) {
+        return "server output: show running-config";
+    }
+    if (isShowLoggingCommand(splitTokens(trimmed))) {
+        return "server output: show logging";
+    }
+    return "server output: " + trimmed;
+}
+
+static void printServerBlockHeader(const std::string& sourceCommand) {
+    std::cout << "\n" << BOLD << DIM << "==== " << canonicalServerCommandLabel(sourceCommand) << " ===="
+              << RST << "\n";
+}
+
+static void printServerBlockFooter() {
+    std::cout << BOLD << DIM << "==== end server output ====" << RST << "\n\n";
+}
+
+static bool isSaveCommand(const std::vector<std::string>& tokens) {
+    if (tokens.size() == 1 && toLowerCopy(tokens[0]) == "save") {
+        return true;
+    }
+    if (tokens.size() == 2 && toLowerCopy(tokens[0]) == "write") {
+        const std::string noun = toLowerCopy(tokens[1]);
+        return noun == "memory" || noun == "mem";
+    }
+    return false;
+}
+
+static bool isStatusCommand(const std::vector<std::string>& tokens) {
+    return tokens.size() == 1 && toLowerCopy(tokens[0]) == "status";
+}
+
+static bool isStateCommand(const std::vector<std::string>& tokens) {
+    return tokens.size() == 1 && toLowerCopy(tokens[0]) == "state";
+}
+
+static bool isRestartCommand(const std::vector<std::string>& tokens) {
+    return tokens.size() == 1 && toLowerCopy(tokens[0]) == "restart";
+}
+
+static bool isStopCommand(const std::vector<std::string>& tokens) {
+    return tokens.size() == 1 && toLowerCopy(tokens[0]) == "stop";
+}
+
+static bool isSetCommand(const std::vector<std::string>& tokens) {
+    return tokens.size() >= 3 && toLowerCopy(tokens[0]) == "set";
+}
+
+static bool isInterfaceCommand(const std::vector<std::string>& tokens) {
+    if (tokens.size() != 2) {
+        return false;
+    }
+    const std::string head = toLowerCopy(tokens[0]);
+    return head == "interface" || head == "int";
+}
+
+static bool isHelpCommand(const std::vector<std::string>& tokens) {
+    return tokens.size() == 1 &&
+           (toLowerCopy(tokens[0]) == "help" || toLowerCopy(tokens[0]) == "table" || tokens[0] == "?");
+}
+
+static void printModeHint() {
+    printLocalInfo("Structured mode commands: configure terminal | interface <name> | shutdown | no shutdown | end");
 }
 
 static int resolveIface(const std::string& token) {
@@ -343,35 +1437,225 @@ static const char* SYS_CMDS[] = { "", "status", "logs", "state", "show", "stop" 
 
 int main() {
     loadInterfaces();
-    printHelp();
+    const bool interactiveSession = isInteractiveSession();
+    if (interactiveSession) {
+        printHelp();
+        printModeHint();
+    }
+    // CLI команды для сопоставления с номерами
+    struct CliCmd {
+        std::string name, proto, ip, port, peer;
+    };
+    std::vector<CliCmd> cli_cmds = {
+        {"exit", "-", "-", "-", "Exit CLI"},
+        {"help", "-", "-", "-", "Show help"},
+        {"show config", "-", "-", "-", "Show config"},
+        {"show interface", "-", "-", "-", "Show interfaces"},
+        {"restart", "-", "-", "-", "Restart server"},
+        {"log", "-", "-", "-", "Show log"}
+    };
+    CliMode mode = CliMode::Exec;
+    std::string selectedInterface;
     while (true) {
         std::string line;
         if (!std::getline(std::cin, line)) break;
         line = trim(line);
-        if (line.empty()) { std::cout << GRN "> " RST; continue; }
+        if (line.empty()) { printPrompt(promptForMode(mode, selectedInterface)); continue; }
+        const std::vector<std::string> tokens = splitTokens(line);
+
+        if (isHelpCommand(tokens)) {
+            if (mode == CliMode::Exec && (tokens[0] == "table" || toLowerCopy(tokens[0]) == "help")) {
+                printHelp();
+                if (interactiveSession) {
+                    printModeHint();
+                }
+            } else {
+                printModeHelp(mode, selectedInterface);
+            }
+            printPrompt(promptForMode(mode, selectedInterface));
+            continue;
+        }
+
+        if (isSaveCommand(tokens)) {
+            printLocalInfo("Interface admin changes are persisted automatically; no separate save step is required.");
+            printPrompt(promptForMode(mode, selectedInterface));
+            continue;
+        }
+
+        if (mode == CliMode::Exec && isConfigureTerminalCommand(tokens)) {
+            mode = CliMode::Config;
+            printLocalInfo("Entered configuration mode");
+            printPrompt(promptForMode(mode));
+            continue;
+        }
+
+        if ((mode == CliMode::Exec || mode == CliMode::Config) && isStatusCommand(tokens)) {
+            sendToServer("status");
+            printPrompt(promptForMode(mode, selectedInterface));
+            continue;
+        }
+
+        if ((mode == CliMode::Exec || mode == CliMode::Config) && isStateCommand(tokens)) {
+            sendToServer("state");
+            printPrompt(promptForMode(mode, selectedInterface));
+            continue;
+        }
+
+        if ((mode == CliMode::Exec || mode == CliMode::Config) && isRestartCommand(tokens)) {
+            sendToServer("restart");
+            printPrompt(promptForMode(mode, selectedInterface));
+            continue;
+        }
+
+        if ((mode == CliMode::Exec || mode == CliMode::Config) && isStopCommand(tokens)) {
+            sendToServer("stop");
+            printPrompt(promptForMode(mode, selectedInterface));
+            continue;
+        }
+
+        if ((mode == CliMode::Exec || mode == CliMode::Config) && isSetCommand(tokens)) {
+            sendToServer(line);
+            printPrompt(promptForMode(mode, selectedInterface));
+            continue;
+        }
+
+        if ((mode == CliMode::Exec || mode == CliMode::Config) && tokens.size() >= 1 && toLowerCopy(tokens[0]) == "set") {
+            printLocalError("Usage: set <key> <value>");
+            printPrompt(promptForMode(mode, selectedInterface));
+            continue;
+        }
+
+        if ((mode == CliMode::Exec || mode == CliMode::Config) && isShowRunningConfigCommand(tokens)) {
+            sendToServer("show config");
+            printPrompt(promptForMode(mode, selectedInterface));
+            continue;
+        }
+
+        if ((mode == CliMode::Exec || mode == CliMode::Config) && isShowLoggingCommand(tokens)) {
+            sendToServer("log");
+            printPrompt(promptForMode(mode, selectedInterface));
+            continue;
+        }
+
+        if ((mode == CliMode::Exec || mode == CliMode::Config) && isShowInterfaceCommand(tokens)) {
+            if (tokens.size() == 2) {
+                sendToServer("show interface");
+            } else if (tokens.size() == 3 || (tokens.size() == 4 && toLowerCopy(tokens[3]) == "detail")) {
+                const int idx = resolveIface(tokens[2]);
+                if (idx >= 0) {
+                    handleIface(g_ifaces[idx], "status");
+                } else {
+                    printLocalError("Unknown interface: " + tokens[2]);
+                }
+            } else {
+                printLocalError("Usage: show interface [<name> [detail]]");
+            }
+            printPrompt(promptForMode(mode, selectedInterface));
+            continue;
+        }
+
+        if (mode == CliMode::Config && isInterfaceCommand(tokens)) {
+            const int idx = resolveIface(tokens[1]);
+            if (idx >= 0) {
+                selectedInterface = g_ifaces[idx].name;
+                mode = CliMode::InterfaceConfig;
+                printLocalInfo("Entered interface configuration mode: " + selectedInterface);
+            } else {
+                printLocalError("Unknown interface: " + tokens[1]);
+            }
+            printPrompt(promptForMode(mode, selectedInterface));
+            continue;
+        }
+
+        if (mode == CliMode::Config || mode == CliMode::InterfaceConfig) {
+            const std::string head = tokens.empty() ? "" : toLowerCopy(tokens[0]);
+            if (head == "end") {
+                mode = CliMode::Exec;
+                selectedInterface.clear();
+                printPrompt(promptForMode(mode));
+                continue;
+            }
+            if (head == "exit") {
+                if (mode == CliMode::InterfaceConfig) {
+                    mode = CliMode::Config;
+                    selectedInterface.clear();
+                } else {
+                    mode = CliMode::Exec;
+                }
+                printPrompt(promptForMode(mode, selectedInterface));
+                continue;
+            }
+            if (head == "commit") {
+                printLocalInfo("Configuration is applied immediately; no separate commit is required.");
+                printPrompt(promptForMode(mode, selectedInterface));
+                continue;
+            }
+        }
+
+        if (mode == CliMode::InterfaceConfig) {
+            const std::string head = tokens.empty() ? "" : toLowerCopy(tokens[0]);
+            if (head == "shutdown") {
+                sendToServer("iface_down " + selectedInterface);
+                printPrompt(promptForMode(mode, selectedInterface));
+                continue;
+            }
+            if (tokens.size() == 2 && head == "no" && toLowerCopy(tokens[1]) == "shutdown") {
+                sendToServer("iface_up " + selectedInterface);
+                printPrompt(promptForMode(mode, selectedInterface));
+                continue;
+            }
+            if (head == "default") {
+                sendToServer("iface_reset " + selectedInterface);
+                printPrompt(promptForMode(mode, selectedInterface));
+                continue;
+            }
+            if (isShowInterfaceCommand(tokens)) {
+                handleIface(g_ifaces[resolveIface(selectedInterface)], "status");
+                printPrompt(promptForMode(mode, selectedInterface));
+                continue;
+            }
+            printLocalWarning("Unsupported interface configuration command: " + line);
+            printPrompt(promptForMode(mode, selectedInterface));
+            continue;
+        }
+
         std::istringstream ss(line);
         std::string token, action;
         ss >> token >> action;
+        // exit по номеру или по имени
         if (token == "exit" || token == "quit" || token == "0") break;
-        bool isNum = !token.empty() &&
-                     token.find_first_not_of("0123456789") == std::string::npos;
+        bool isNum = !token.empty() && token.find_first_not_of("0123456789") == std::string::npos;
         if (isNum) {
             int n = std::stoi(token);
-            if (n >= 1 && n <= 5) {
-                sendToServer(SYS_CMDS[n]);
-                std::cout << GRN "> " RST;
+            if (n >= 0 && n < (int)cli_cmds.size()) {
+                const std::string& cmd = cli_cmds[n].name;
+                if (cmd == "exit") break;
+                // help теперь только локально
+                else if (cmd == "help") { printHelp(); if (interactiveSession) { printModeHint(); } printPrompt(promptForMode(mode, selectedInterface)); }
+                else if (cmd == "show config") sendToServer("show config");
+                else if (cmd == "show interface") sendToServer("show interface");
+                else if (cmd == "restart") sendToServer("restart");
+                else if (cmd == "log") sendToServer("log");
+                printPrompt(promptForMode(mode, selectedInterface));
+                continue;
+            }
+            // Поиск интерфейса по номеру через карту
+            auto it = iface_num_to_idx.find(n);
+            if (it != iface_num_to_idx.end()) {
+                handleIface(g_ifaces[it->second], action);
+                printPrompt(promptForMode(mode, selectedInterface));
                 continue;
             }
         }
         int idx = resolveIface(token);
         if (idx >= 0) {
             handleIface(g_ifaces[idx], action);
-            std::cout << GRN "> " RST;
+            printPrompt(promptForMode(mode, selectedInterface));
             continue;
         }
         sendToServer(line);
-        std::cout << GRN "> " RST;
+        printPrompt(promptForMode(mode, selectedInterface));
     }
-    std::cout << "\nExiting vEPC CLI\n";
+    std::cout << "\n" << BOLD << MAG << "Exiting vEPC CLI" << RST << "\n";
     return 0;
 }
