@@ -483,6 +483,19 @@
    - Ожидаемый результат:
       - `S11` получает минимально наблюдаемый runtime path с `Rx Packets`, `Rx Bytes`, `Last Peer` и `Last Activity`, пригодный для следующего шага по реальному `GTP-C` handling
 
+3. Шаг 5.3: сделано
+   - Файлы: `main.cpp`, `CMakeLists.txt`, `cmake/TestS11Telemetry.cmake`, `test_s11_gtpc_client.cpp`
+   - Изменения:
+      - пропустить входящие UDP datagrams на `S11` через существующий `GTPv1-C` parser и `handleRealGtpMessage`, не возвращаясь к отдельному `GTP-C` server thread ownership
+      - добавить helper `test-s11-gtpc-client`, который шлёт demo `Create PDP Context Request` и проверяет стабильный `Create PDP Context Response`
+      - усилить `s11-telemetry-smoke`: очищать runtime state перед стартом, проверять создание `PDP context` через `state` и подтверждать parse/response logs для `Create PDP`
+   - Проверка:
+      - `cmake --build build-win --config Release`
+      - `ctest --test-dir build-win -C Release -R s11-telemetry-smoke --output-on-failure`
+      - `ctest --test-dir build-win -C Release --output-on-failure`
+   - Ожидаемый результат:
+      - `S11` получает минимальный наблюдаемый `GTP-C` roundtrip path, в котором demo `Create PDP` не только доходит до сокета, но и приводит к обновлению `PDP contexts` и ответу в сеть
+
 ## Ближайший план (рекомендуемый порядок)
 
 1. Закрыть `Этап 0.6`: help по режимам, структурированные обёртки для всех runtime-команд, стабильные smoke tests.

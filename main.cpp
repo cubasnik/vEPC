@@ -1707,6 +1707,30 @@ void VNodeController::interfaceEndpointThread(InterfaceConfigEntry entry) {
             message << "Interface endpoint " << entry.name
                     << " received " << received << " bytes from " << peerIp;
             log("MAIN", message.str());
+
+            if (entry.name == "S11") {
+                const std::vector<uint8_t> packet(buffer.begin(), buffer.begin() + received);
+                vepc::GtpV1Header header;
+                std::string parseError;
+                if (!vepc::parseGtpV1Header(packet, header, parseError)) {
+                    log("GTP", "Rejected packet from " + peerIp + ": " + parseError);
+                    continue;
+                }
+
+                std::ostringstream gtpLog;
+                gtpLog << "Parsed GTPv1-C header from " << peerIp
+                       << ": type=" << vepc::formatGtpMessageType(header.messageType)
+                       << ", teid=0x" << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << header.teid
+                       << std::dec << std::setfill(' ')
+                       << ", sequence=" << header.sequence
+                       << ", payload_length=" << header.payloadLength;
+                log("GTP", gtpLog.str());
+
+                if (!handleRealGtpMessage(socketHandle, peerAddr, peerIp, packet, header)) {
+                    log("GTP", "No real handler for parsed message type " + vepc::formatGtpMessageType(header.messageType)
+                        + "; packet stays in parser-only demo path");
+                }
+            }
         }
     } else {
         while (running) {

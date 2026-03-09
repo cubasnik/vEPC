@@ -31,6 +31,11 @@ add_executable(test-runtime-cli
     test_runtime_cli.cpp
 )
 
+add_executable(test-s11-gtpc-client
+    test_s11_gtpc_client.cpp
+    src/gtp_parser.cpp
+)
+
 add_test(NAME gtp-parser-smoke COMMAND test-gtp-parser)
 add_test(NAME s1ap-parser-smoke COMMAND test-s1ap-parser)
 add_test(
@@ -61,6 +66,7 @@ add_test(
     COMMAND ${CMAKE_COMMAND}
         -DVEPC_EXE=$<TARGET_FILE:vepc>
         -DRUNTIME_CLI_EXE=$<TARGET_FILE:test-runtime-cli>
+    -DS11_GTPC_CLIENT_EXE=$<TARGET_FILE:test-s11-gtpc-client>
         -DSOURCE_DIR=${CMAKE_SOURCE_DIR}
         -P ${CMAKE_SOURCE_DIR}/cmake/TestS11Telemetry.cmake
 )
@@ -76,6 +82,7 @@ if (WIN32)
     target_link_libraries(vepc ws2_32 iphlpapi)
     target_link_libraries(vepc-cli ws2_32)
     target_link_libraries(test-runtime-cli ws2_32)
+    target_link_libraries(test-s11-gtpc-client ws2_32)
 
     set(ROOT_SYNC_SCRIPT ${CMAKE_SOURCE_DIR}/cmake/SyncBinaryToRoot.cmake)
 

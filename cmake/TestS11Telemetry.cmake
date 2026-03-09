@@ -8,6 +8,10 @@ if(NOT DEFINED RUNTIME_CLI_EXE)
 	message(FATAL_ERROR "RUNTIME_CLI_EXE is required")
 endif()
 
+if(NOT DEFINED S11_GTPC_CLIENT_EXE)
+	message(FATAL_ERROR "S11_GTPC_CLIENT_EXE is required")
+endif()
+
 if(NOT DEFINED SOURCE_DIR)
 	message(FATAL_ERROR "SOURCE_DIR is required")
 endif()
@@ -18,9 +22,13 @@ endif()
 
 set(LOG_DIR "${SOURCE_DIR}/build/logs")
 set(LOG_FILE "${LOG_DIR}/vepc.log")
+set(STATE_DIR "${SOURCE_DIR}/build/state")
+set(STATE_FILE "${STATE_DIR}/runtime_state.json")
 
 file(MAKE_DIRECTORY "${LOG_DIR}")
+file(MAKE_DIRECTORY "${STATE_DIR}")
 file(REMOVE "${LOG_FILE}")
+file(REMOVE "${STATE_FILE}")
 
 set(START_SCRIPT "$proc = Start-Process -FilePath '${VEPC_EXE}' -PassThru\n$proc.Id\n")
 
@@ -41,16 +49,8 @@ if(NOT VEPC_PID MATCHES "^[0-9]+$")
 	message(FATAL_ERROR "Failed to capture vepc PID: '${START_OUTPUT}' '${START_ERROR}'")
 endif()
 
-set(SEND_SCRIPT [=[
-Start-Sleep -Seconds 2
-$client = New-Object System.Net.Sockets.UdpClient
-$bytes = [byte[]](10,20,30,40,50,60)
-[void]$client.Send($bytes, $bytes.Length, '127.0.0.1', 2123)
-$client.Dispose()
-]=])
-
 execute_process(
-	COMMAND powershell -NoProfile -Command "${SEND_SCRIPT}"
+	COMMAND "${S11_GTPC_CLIENT_EXE}" 15
 	WORKING_DIRECTORY "${SOURCE_DIR}"
 	RESULT_VARIABLE SEND_RESULT
 	OUTPUT_VARIABLE SEND_OUTPUT
@@ -59,7 +59,7 @@ execute_process(
 )
 if(NOT SEND_RESULT EQUAL 0)
 	execute_process(COMMAND taskkill /PID ${VEPC_PID} /F OUTPUT_QUIET ERROR_QUIET)
-	message(FATAL_ERROR "Failed to send S11 demo datagram: ${SEND_ERROR}")
+	message(FATAL_ERROR "Failed to complete S11 GTP-C roundtrip: ${SEND_OUTPUT} ${SEND_ERROR}")
 endif()
 
 execute_process(
@@ -116,6 +116,18 @@ endif()
 if(NOT CLI_OUTPUT MATCHES "- Name: S11")
 	message(FATAL_ERROR "Expected S11 endpoint telemetry entry in state output. Output: ${CLI_OUTPUT}")
 endif()
+if(NOT CLI_OUTPUT MATCHES "PDP contexts: 1")
+	message(FATAL_ERROR "Expected PDP context created by S11 Create PDP request. Output: ${CLI_OUTPUT}")
+endif()
+if(NOT CLI_OUTPUT MATCHES "- TEID: 0x10004321")
+	message(FATAL_ERROR "Expected assigned TEID from S11 Create PDP flow. Output: ${CLI_OUTPUT}")
+endif()
+if(NOT CLI_OUTPUT MATCHES "IMSI: 123456789012345")
+	message(FATAL_ERROR "Expected IMSI from parsed S11 Create PDP request. Output: ${CLI_OUTPUT}")
+endif()
+if(NOT CLI_OUTPUT MATCHES "APN: internet")
+	message(FATAL_ERROR "Expected APN from parsed S11 Create PDP request. Output: ${CLI_OUTPUT}")
+endif()
 
 if(NOT EXISTS "${LOG_FILE}")
 	message(FATAL_ERROR "Expected log file ${LOG_FILE} to exist")
@@ -125,6 +137,12 @@ file(READ "${LOG_FILE}" LOG_CONTENT)
 if(NOT LOG_CONTENT MATCHES "Interface endpoint S11 ready on 127\\.0\\.0\\.1:2123")
 	message(FATAL_ERROR "Missing S11 endpoint startup log entry")
 endif()
-if(NOT LOG_CONTENT MATCHES "Interface endpoint S11 received 6 bytes from 127\\.0\\.0\\.1")
-	message(FATAL_ERROR "Missing S11 receive log entry")
+if(NOT LOG_CONTENT MATCHES "Parsed GTPv1-C header from 127\\.0\\.0\\.1: type=Create PDP Context Request")
+	message(FATAL_ERROR "Missing S11 GTP-C parse log entry")
+endif()
+if(NOT LOG_CONTENT MATCHES "Create PDP request parsed from 127\\.0\\.0\\.1: imsi=123456789012345, apn=internet")
+	message(FATAL_ERROR "Missing Create PDP request details in log")
+endif()
+if(NOT LOG_CONTENT MATCHES "Sent Create PDP response to 127\\.0\\.0\\.1: teid=0x10004321")
+	message(FATAL_ERROR "Missing Create PDP response log entry")
 endif()
