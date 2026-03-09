@@ -56,6 +56,14 @@ add_test(
         -DSOURCE_DIR=${CMAKE_SOURCE_DIR}
         -P ${CMAKE_SOURCE_DIR}/cmake/TestGtpuTelemetry.cmake
 )
+add_test(
+    NAME s11-telemetry-smoke
+    COMMAND ${CMAKE_COMMAND}
+        -DVEPC_EXE=$<TARGET_FILE:vepc>
+        -DRUNTIME_CLI_EXE=$<TARGET_FILE:test-runtime-cli>
+        -DSOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -P ${CMAKE_SOURCE_DIR}/cmake/TestS11Telemetry.cmake
+)
 
 # Для Linux нужно добавить pthread
 set(THREADS_PREFER_PTHREAD_FLAG ON)

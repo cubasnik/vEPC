@@ -421,28 +421,39 @@ static bool isGenericEndpointProtocol(const InterfaceConfigEntry& entry, const s
     }
 
     const auto gtpUserPortIt = config.find("gtp-u-port");
-    return entry.proto == "UDP"
-        && gtpUserPortIt != config.end()
-        && entry.port == gtpUserPortIt->second;
+    if (entry.proto == "UDP" && gtpUserPortIt != config.end() && entry.port == gtpUserPortIt->second) {
+        return true;
+    }
+    const auto s11PortIt = config.find("s11-port");
+    if (entry.name == "S11" && entry.proto == "UDP" && s11PortIt != config.end() && entry.port == s11PortIt->second) {
+        return true;
+    }
+    return false;
 }
 
 static std::string resolveInterfaceBindIp(const InterfaceConfigEntry& entry, const std::map<std::string, std::string>& config) {
     const auto gtpUserPortIt = config.find("gtp-u-port");
-    const bool isGtpUser = gtpUserPortIt != config.end()
-        && entry.proto == "UDP"
-        && entry.port == gtpUserPortIt->second;
-    if (isGtpUser) {
+    if (gtpUserPortIt != config.end() && entry.proto == "UDP" && entry.port == gtpUserPortIt->second) {
         const auto bindIpIt = config.find("gn-gtp-u-bind-ip");
         if (bindIpIt != config.end() && !bindIpIt->second.empty()) {
             return bindIpIt->second;
         }
-
         const auto sgsnIpIt = config.find("sgsn-ip");
         if (sgsnIpIt != config.end() && !sgsnIpIt->second.empty()) {
             return sgsnIpIt->second;
         }
     }
-
+    const auto s11PortIt = config.find("s11-port");
+    if (entry.name == "S11" && s11PortIt != config.end() && entry.proto == "UDP" && entry.port == s11PortIt->second) {
+        const auto bindIpIt = config.find("s11-bind-ip");
+        if (bindIpIt != config.end() && !bindIpIt->second.empty()) {
+            return bindIpIt->second;
+        }
+        const auto mmeIpIt = config.find("mme-ip");
+        if (mmeIpIt != config.end() && !mmeIpIt->second.empty()) {
+            return mmeIpIt->second;
+        }
+    }
     return entry.ip;
 }
 
@@ -1211,6 +1222,14 @@ public:
             config["gn-gtp-u-port"] = value;
         } else if (key == "gn-gtp-u-port") {
             config["gtp-u-port"] = value;
+        } else if (key == "s11-port") {
+            config["s11-bind-port"] = value;
+        } else if (key == "s11-bind-port") {
+            config["s11-port"] = value;
+        } else if (key == "s11-ip") {
+            config["s11-bind-ip"] = value;
+        } else if (key == "s11-bind-ip") {
+            config["s11-ip"] = value;
         }
     }
 
@@ -1425,6 +1444,8 @@ void VNodeController::applyRuntimeConfigAliases() {
     setConfigAlias(config, "s1ap-bind-ip", "mme-ip");
     setConfigAlias(config, "gn-gtp-c-port", "gtp-c-port");
     setConfigAlias(config, "gn-gtp-u-port", "gtp-u-port");
+    setConfigAlias(config, "s11-bind-port", "s11-port");
+    setConfigAlias(config, "s11-bind-ip", "mme-ip");
 
     if (config.find("gn-gtp-c-bind-ip") != config.end() && !config["gn-gtp-c-bind-ip"].empty()) {
         config["sgsn-ip"] = config["gn-gtp-c-bind-ip"];
@@ -1749,9 +1770,13 @@ InterfaceDiagnostics VNodeController::buildInterfaceDiagnostics(const InterfaceC
     const auto gtpUserPortIt = config.find("gtp-u-port");
     const bool connectionOriented = isConnectionOrientedProtocol(entry);
     const bool isS1ap = s1apPortIt != config.end() && entry.proto == "SCTP" && entry.port == s1apPortIt->second;
-    const bool isGtpControl = gtpControlPortIt != config.end() && entry.proto == "UDP" && entry.port == gtpControlPortIt->second;
-    const bool isGtpUser = gtpUserPortIt != config.end() && entry.proto == "UDP" && entry.port == gtpUserPortIt->second;
     const bool isGenericProtocol = isGenericEndpointProtocol(entry, config);
+    const bool genericOwnsGtpControl = entry.name == "S11" && isGenericProtocol;
+    const bool isGtpControl = gtpControlPortIt != config.end()
+        && entry.proto == "UDP"
+        && entry.port == gtpControlPortIt->second
+        && !genericOwnsGtpControl;
+    const bool isGtpUser = gtpUserPortIt != config.end() && entry.proto == "UDP" && entry.port == gtpUserPortIt->second;
     const InterfaceEndpointRuntime endpointRuntime = getInterfaceEndpointState(entry);
 
     if (!diagnostics.adminUp) {
@@ -3372,6 +3397,14 @@ void VNodeController::sgsnThreadFunc() {
 void VNodeController::gtpServerThreadFunc() {
     int port = std::stoi(config.at("gtp-c-port"));
     const std::string bindIp = config.count("sgsn-ip") != 0 ? config.at("sgsn-ip") : "0.0.0.0";
+
+    const auto entries = loadInterfaceConfigEntries();
+    for (const auto& entry : entries) {
+        if (entry.name == "S11" && entry.proto == "UDP" && entry.port == std::to_string(port)) {
+            log("GTP", "S11 endpoint is handled by generic endpoint thread");
+            return;
+        }
+    }
 
 #ifdef _WIN32
     WSADATA wsaData{};

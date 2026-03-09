@@ -471,6 +471,18 @@
    - Ожидаемый результат:
       - `Gn` перестаёт быть только конфиг-записью и получает минимально наблюдаемый runtime path, пригодный для дальнейшего наращивания `GTP-U`
 
+2. Шаг 5.2: сделано
+   - Файлы: `main.cpp`, `CMakeLists.txt`, `cmake/TestS11Telemetry.cmake`
+   - Изменения:
+      - перевести `S11` на generic endpoint thread вместо отдельного ownership через `GTP-C` server thread, чтобы telemetry и smoke использовали один и тот же runtime path
+      - ограничить special-case для `s11-bind-ip` и `s11-port` только интерфейсом `S11`, чтобы не перехватывать другие UDP interfaces на порту `2123`
+      - добавить smoke `s11-telemetry-smoke`, который шлёт UDP datagram на `127.0.0.1:2123` и проверяет `iface_status S11`, `state` и лог receive path
+   - Проверка:
+      - `cmake --build build-win --config Release --target vepc`
+      - `ctest --test-dir build-win -C Release -R s11-telemetry-smoke --output-on-failure`
+   - Ожидаемый результат:
+      - `S11` получает минимально наблюдаемый runtime path с `Rx Packets`, `Rx Bytes`, `Last Peer` и `Last Activity`, пригодный для следующего шага по реальному `GTP-C` handling
+
 ## Ближайший план (рекомендуемый порядок)
 
 1. Закрыть `Этап 0.6`: help по режимам, структурированные обёртки для всех runtime-команд, стабильные smoke tests.
