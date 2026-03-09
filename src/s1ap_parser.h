@@ -38,6 +38,30 @@ struct DemoNasAuthenticationResponse {
     bool hasKeySetIdentifier = false;
 };
 
+struct DemoNasSecurityModeCommand {
+    uint8_t keySetIdentifier = 0;
+    uint8_t selectedAlgorithm = 0;
+    bool hasKeySetIdentifier = false;
+    bool hasSelectedAlgorithm = false;
+};
+
+struct DemoNasSecurityModeComplete {
+    uint8_t keySetIdentifier = 0;
+    bool hasKeySetIdentifier = false;
+};
+
+struct DemoNasAttachAccept {
+    uint8_t keySetIdentifier = 0;
+    uint8_t attachResult = 0;
+    bool hasKeySetIdentifier = false;
+    bool hasAttachResult = false;
+};
+
+struct DemoNasAttachComplete {
+    uint8_t keySetIdentifier = 0;
+    bool hasKeySetIdentifier = false;
+};
+
 std::string formatS1apProcedureCode(uint8_t procedureCode);
 std::string formatNasMessageType(uint8_t messageType);
 bool parseDemoInitialUeMessage(const std::vector<uint8_t>& packet,
@@ -52,7 +76,23 @@ bool parseNasAuthenticationRequest(const std::vector<uint8_t>& nasPdu,
 bool parseNasAuthenticationResponse(const std::vector<uint8_t>& nasPdu,
                                     DemoNasAuthenticationResponse& response,
                                     std::string& error);
+bool parseNasSecurityModeCommand(const std::vector<uint8_t>& nasPdu,
+                                 DemoNasSecurityModeCommand& command,
+                                 std::string& error);
+bool parseNasSecurityModeComplete(const std::vector<uint8_t>& nasPdu,
+                                  DemoNasSecurityModeComplete& complete,
+                                  std::string& error);
+bool parseNasAttachAccept(const std::vector<uint8_t>& nasPdu,
+                          DemoNasAttachAccept& accept,
+                          std::string& error);
+bool parseNasAttachComplete(const std::vector<uint8_t>& nasPdu,
+                            DemoNasAttachComplete& complete,
+                            std::string& error);
 std::vector<uint8_t> buildNasAuthenticationRequest(uint8_t keySetIdentifier = 0x01);
+std::vector<uint8_t> buildNasSecurityModeCommand(uint8_t keySetIdentifier = 0x01,
+                                                 uint8_t selectedAlgorithm = 0x01);
+std::vector<uint8_t> buildNasAttachAccept(uint8_t keySetIdentifier = 0x01,
+                                          uint8_t attachResult = 0x01);
 std::vector<uint8_t> buildDemoDownlinkNasTransport(const std::string& imsi,
                                                    const std::string& guti,
                                                    const std::vector<uint8_t>& nasPdu);

@@ -92,11 +92,18 @@ struct UEContext {
     bool        authenticated = false;
     bool        auth_request_sent = false;
     bool        auth_response_received = false;
+    bool        security_mode_command_sent = false;
+    bool        security_mode_complete = false;
+    bool        attach_accept_sent = false;
+    bool        attach_complete_received = false;
+    bool        attached = false;
     uint8_t     last_nas_message_type = 0;
     bool        has_last_nas_message_type = false;
     uint8_t     last_s1ap_procedure = 0;
     uint8_t     security_context_id = 0;
     bool        has_security_context_id = false;
+    uint8_t     selected_nas_algorithm = 0;
+    bool        has_selected_nas_algorithm = false;
     std::time_t updated_at = 0;
 };
 
@@ -476,6 +483,18 @@ static std::string formatSecurityContextIdValue(const UEContext& context) {
 }
 
 static std::string formatAuthFlowState(const UEContext& context) {
+    if (context.attached || context.attach_complete_received) {
+        return "attach-complete";
+    }
+    if (context.attach_accept_sent) {
+        return "attach-accept-sent";
+    }
+    if (context.security_mode_complete) {
+        return "security-mode-complete";
+    }
+    if (context.security_mode_command_sent) {
+        return "security-mode-command-sent";
+    }
     if (context.authenticated) {
         return "authentication-complete";
     }
@@ -489,6 +508,17 @@ static std::string formatAuthFlowState(const UEContext& context) {
         return "attach-request-received";
     }
     return "idle";
+}
+
+static std::string formatNasAlgorithmValue(const UEContext& context) {
+    if (!context.has_selected_nas_algorithm) {
+        return "n/a";
+    }
+
+    std::ostringstream oss;
+    oss << "0x" << std::uppercase << std::hex << std::setw(2) << std::setfill('0')
+        << static_cast<int>(context.selected_nas_algorithm);
+    return oss.str();
 }
 
 static uint32_t allocateCreatePdpTeid(const vepc::GtpV1Header& header) {
@@ -1381,9 +1411,15 @@ std::string VNodeController::formatStateSnapshotLocked() const {
             oss << "  S1AP Procedure: " << formatS1apProcedureValue(context) << "\n";
             oss << "  NAS Message: " << formatNasMessageTypeValue(context) << "\n";
             oss << "  Security Context ID: " << formatSecurityContextIdValue(context) << "\n";
+            oss << "  NAS Algorithm: " << formatNasAlgorithmValue(context) << "\n";
             oss << "  Auth Flow: " << formatAuthFlowState(context) << "\n";
             oss << "  Auth Request Sent: " << (context.auth_request_sent ? "yes" : "no") << "\n";
             oss << "  Auth Response Received: " << (context.auth_response_received ? "yes" : "no") << "\n";
+            oss << "  Security Mode Command Sent: " << (context.security_mode_command_sent ? "yes" : "no") << "\n";
+            oss << "  Security Mode Complete: " << (context.security_mode_complete ? "yes" : "no") << "\n";
+            oss << "  Attach Accept Sent: " << (context.attach_accept_sent ? "yes" : "no") << "\n";
+            oss << "  Attach Complete Received: " << (context.attach_complete_received ? "yes" : "no") << "\n";
+            oss << "  Attached: " << (context.attached ? "yes" : "no") << "\n";
             oss << "  Authenticated: " << (context.authenticated ? "yes" : "no") << "\n";
             oss << "  Updated At: " << formatTimestamp(context.updated_at) << "\n";
         }
@@ -1529,6 +1565,94 @@ bool VNodeController::handleDemoS1apMessage(NativeSocket clientSocket,
                      << ", auth_flow=" << formatAuthFlowState(context);
     log("S1AP", parsedMessageLog.str());
 
+    if (message.nasMessageType == 0x43) {
+        vepc::DemoNasAttachComplete completeInfo;
+        if (!vepc::parseNasAttachComplete(message.nasPdu, completeInfo, parseError)) {
+            log("S1AP", "Rejected demo Attach Complete from " + peerId + ": " + parseError);
+            return false;
+        }
+        if (!context.attach_accept_sent || !context.security_mode_complete || !context.has_security_context_id) {
+            log("S1AP", "Rejected demo Attach Complete from " + peerId + ": no pending attach accept for IMSI " + message.imsi);
+            return false;
+        }
+        if (!completeInfo.hasKeySetIdentifier || completeInfo.keySetIdentifier != context.security_context_id) {
+            std::ostringstream mismatch;
+            mismatch << "Rejected demo Attach Complete from " << peerId
+                     << ": security context mismatch for IMSI " << message.imsi
+                     << " (expected=" << formatSecurityContextIdValue(context)
+                     << ", got=0x" << std::uppercase << std::hex << std::setw(2) << std::setfill('0')
+                     << static_cast<int>(completeInfo.keySetIdentifier) << std::dec << std::setfill(' ') << ")";
+            log("S1AP", mismatch.str());
+            return false;
+        }
+
+        context.attach_complete_received = true;
+        context.attached = true;
+        upsertUeContext(context);
+        log("S1AP", "Attach Complete accepted for IMSI " + message.imsi);
+        return true;
+    }
+
+    if (message.nasMessageType == 0x5E) {
+        vepc::DemoNasSecurityModeComplete completeInfo;
+        if (!vepc::parseNasSecurityModeComplete(message.nasPdu, completeInfo, parseError)) {
+            log("S1AP", "Rejected demo Security Mode Complete from " + peerId + ": " + parseError);
+            return false;
+        }
+        if (!context.security_mode_command_sent || !context.has_security_context_id) {
+            log("S1AP", "Rejected demo Security Mode Complete from " + peerId + ": no pending security mode command for IMSI " + message.imsi);
+            return false;
+        }
+        if (!completeInfo.hasKeySetIdentifier || completeInfo.keySetIdentifier != context.security_context_id) {
+            std::ostringstream mismatch;
+            mismatch << "Rejected demo Security Mode Complete from " << peerId
+                     << ": security context mismatch for IMSI " << message.imsi
+                     << " (expected=" << formatSecurityContextIdValue(context)
+                     << ", got=0x" << std::uppercase << std::hex << std::setw(2) << std::setfill('0')
+                     << static_cast<int>(completeInfo.keySetIdentifier) << std::dec << std::setfill(' ') << ")";
+            log("S1AP", mismatch.str());
+            return false;
+        }
+
+        context.security_mode_complete = true;
+        const std::vector<uint8_t> attachAcceptNas = vepc::buildNasAttachAccept(context.security_context_id, 0x01);
+        vepc::DemoNasAttachAccept attachAcceptInfo;
+        if (!vepc::parseNasAttachAccept(attachAcceptNas, attachAcceptInfo, parseError)) {
+            log("S1AP", "Failed to build demo Attach Accept for IMSI " + message.imsi + ": " + parseError);
+            return false;
+        }
+
+        context.attach_accept_sent = true;
+        context.attach_complete_received = false;
+        context.attached = false;
+
+        const std::vector<uint8_t> response = vepc::buildDemoDownlinkNasTransport(message.imsi, context.guti, attachAcceptNas);
+        const int sent = send(clientSocket,
+#ifdef _WIN32
+                              reinterpret_cast<const char*>(response.data()),
+#else
+                              response.data(),
+#endif
+                              static_cast<int>(response.size()),
+                              0);
+        if (sent != static_cast<int>(response.size())) {
+            log("S1AP", "Failed to send demo Attach Accept to " + peerId + ": " + getSocketErrorText());
+            return false;
+        }
+
+        upsertUeContext(context);
+
+        std::ostringstream responseLog;
+        responseLog << "Sent demo Downlink NAS Transport to " << peerId
+                    << ": s1ap=" << vepc::formatS1apProcedureCode(0x0D)
+                    << ", nas=" << vepc::formatNasMessageType(attachAcceptNas.front())
+                    << ", bytes=" << response.size()
+                    << ", security_context=" << formatSecurityContextIdValue(context);
+        log("S1AP", responseLog.str());
+        log("S1AP", "Security Mode Complete accepted for IMSI " + message.imsi);
+        return true;
+    }
+
     if (message.nasMessageType == 0x53) {
         vepc::DemoNasAuthenticationResponse responseInfo;
         if (!vepc::parseNasAuthenticationResponse(message.nasPdu, responseInfo, parseError)) {
@@ -1552,7 +1676,42 @@ bool VNodeController::handleDemoS1apMessage(NativeSocket clientSocket,
 
         context.auth_response_received = true;
         context.authenticated = true;
+        const std::vector<uint8_t> securityModeNas = vepc::buildNasSecurityModeCommand(context.security_context_id, 0x01);
+        vepc::DemoNasSecurityModeCommand securityModeInfo;
+        if (!vepc::parseNasSecurityModeCommand(securityModeNas, securityModeInfo, parseError)) {
+            log("S1AP", "Failed to build demo Security Mode Command for IMSI " + message.imsi + ": " + parseError);
+            return false;
+        }
+
+        context.selected_nas_algorithm = securityModeInfo.selectedAlgorithm;
+        context.has_selected_nas_algorithm = securityModeInfo.hasSelectedAlgorithm;
+        context.security_mode_command_sent = true;
+        context.security_mode_complete = false;
+
+        const std::vector<uint8_t> response = vepc::buildDemoDownlinkNasTransport(message.imsi, context.guti, securityModeNas);
+        const int sent = send(clientSocket,
+#ifdef _WIN32
+                              reinterpret_cast<const char*>(response.data()),
+#else
+                              response.data(),
+#endif
+                              static_cast<int>(response.size()),
+                              0);
+        if (sent != static_cast<int>(response.size())) {
+            log("S1AP", "Failed to send demo Security Mode Command to " + peerId + ": " + getSocketErrorText());
+            return false;
+        }
+
         upsertUeContext(context);
+
+        std::ostringstream responseLog;
+        responseLog << "Sent demo Downlink NAS Transport to " << peerId
+                    << ": s1ap=" << vepc::formatS1apProcedureCode(0x0D)
+                    << ", nas=" << vepc::formatNasMessageType(securityModeNas.front())
+                    << ", bytes=" << response.size()
+                    << ", security_context=" << formatSecurityContextIdValue(context)
+                    << ", algorithm=" << formatNasAlgorithmValue(context);
+        log("S1AP", responseLog.str());
         log("S1AP", "Authentication Response accepted for IMSI " + message.imsi);
         return true;
     }
@@ -1575,8 +1734,15 @@ bool VNodeController::handleDemoS1apMessage(NativeSocket clientSocket,
     context.authenticated = false;
     context.auth_request_sent = true;
     context.auth_response_received = false;
+    context.security_mode_command_sent = false;
+    context.security_mode_complete = false;
+    context.attach_accept_sent = false;
+    context.attach_complete_received = false;
+    context.attached = false;
     context.security_context_id = requestInfo.keySetIdentifier;
     context.has_security_context_id = requestInfo.hasKeySetIdentifier;
+    context.has_selected_nas_algorithm = false;
+    context.selected_nas_algorithm = 0;
 
     const std::vector<uint8_t> response = vepc::buildDemoDownlinkNasTransport(message.imsi, message.guti, nasResponse);
     const int sent = send(clientSocket,

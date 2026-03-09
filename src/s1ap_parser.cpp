@@ -115,6 +115,14 @@ std::string formatNasMessageType(uint8_t messageType) {
         return "Authentication Request (0x52)";
     case 0x53:
         return "Authentication Response (0x53)";
+    case 0x5D:
+        return "Security Mode Command (0x5D)";
+    case 0x5E:
+        return "Security Mode Complete (0x5E)";
+    case 0x42:
+        return "Attach Accept (0x42)";
+    case 0x43:
+        return "Attach Complete (0x43)";
     default: {
         std::ostringstream oss;
         oss << "0x" << std::uppercase << std::hex << std::setw(2) << std::setfill('0')
@@ -176,10 +184,112 @@ bool parseNasAuthenticationResponse(const std::vector<uint8_t>& nasPdu,
     return true;
 }
 
+bool parseNasSecurityModeCommand(const std::vector<uint8_t>& nasPdu,
+                                 DemoNasSecurityModeCommand& command,
+                                 std::string& error) {
+    command = {};
+    error.clear();
+
+    if (nasPdu.size() < 3) {
+        error = "demo Security Mode Command is too short";
+        return false;
+    }
+    if (nasPdu[0] != 0x5D) {
+        error = "unexpected NAS message type for Security Mode Command: " + formatNasMessageType(nasPdu[0]);
+        return false;
+    }
+
+    command.keySetIdentifier = nasPdu[1];
+    command.hasKeySetIdentifier = true;
+    command.selectedAlgorithm = nasPdu[2];
+    command.hasSelectedAlgorithm = true;
+    return true;
+}
+
+bool parseNasSecurityModeComplete(const std::vector<uint8_t>& nasPdu,
+                                  DemoNasSecurityModeComplete& complete,
+                                  std::string& error) {
+    complete = {};
+    error.clear();
+
+    if (nasPdu.size() < 2) {
+        error = "demo Security Mode Complete is too short";
+        return false;
+    }
+    if (nasPdu[0] != 0x5E) {
+        error = "unexpected NAS message type for Security Mode Complete: " + formatNasMessageType(nasPdu[0]);
+        return false;
+    }
+
+    complete.keySetIdentifier = nasPdu[1];
+    complete.hasKeySetIdentifier = true;
+    return true;
+}
+
+bool parseNasAttachAccept(const std::vector<uint8_t>& nasPdu,
+                          DemoNasAttachAccept& accept,
+                          std::string& error) {
+    accept = {};
+    error.clear();
+
+    if (nasPdu.size() < 3) {
+        error = "demo Attach Accept is too short";
+        return false;
+    }
+    if (nasPdu[0] != 0x42) {
+        error = "unexpected NAS message type for Attach Accept: " + formatNasMessageType(nasPdu[0]);
+        return false;
+    }
+
+    accept.keySetIdentifier = nasPdu[1];
+    accept.attachResult = nasPdu[2];
+    accept.hasKeySetIdentifier = true;
+    accept.hasAttachResult = true;
+    return true;
+}
+
+bool parseNasAttachComplete(const std::vector<uint8_t>& nasPdu,
+                            DemoNasAttachComplete& complete,
+                            std::string& error) {
+    complete = {};
+    error.clear();
+
+    if (nasPdu.size() < 2) {
+        error = "demo Attach Complete is too short";
+        return false;
+    }
+    if (nasPdu[0] != 0x43) {
+        error = "unexpected NAS message type for Attach Complete: " + formatNasMessageType(nasPdu[0]);
+        return false;
+    }
+
+    complete.keySetIdentifier = nasPdu[1];
+    complete.hasKeySetIdentifier = true;
+    return true;
+}
+
 std::vector<uint8_t> buildNasAuthenticationRequest(uint8_t keySetIdentifier) {
     return {
         0x52,
         keySetIdentifier,
+    };
+}
+
+std::vector<uint8_t> buildNasSecurityModeCommand(uint8_t keySetIdentifier,
+                                                 uint8_t selectedAlgorithm) {
+    return {
+        0x5D,
+        keySetIdentifier,
+        selectedAlgorithm,
+    };
+}
+
+std::vector<uint8_t> buildNasAttachAccept(uint8_t keySetIdentifier,
+                                          uint8_t attachResult) {
+    return {
+        0x42,
+        keySetIdentifier,
+        attachResult,
     };
 }
 

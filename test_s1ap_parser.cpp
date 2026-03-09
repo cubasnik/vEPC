@@ -25,6 +25,10 @@ int main() {
     vepc::DemoDownlinkNasTransport downlinkTransport;
     vepc::DemoNasAuthenticationRequest authRequest;
     vepc::DemoNasAuthenticationResponse authResponse;
+    vepc::DemoNasSecurityModeCommand securityModeCommand;
+    vepc::DemoNasSecurityModeComplete securityModeComplete;
+    vepc::DemoNasAttachAccept attachAccept;
+    vepc::DemoNasAttachComplete attachComplete;
 
     const std::vector<uint8_t> initialUeMessage = {
         0x0C,
@@ -41,6 +45,10 @@ int main() {
     ok &= expect(vepc::formatNasMessageType(message.nasMessageType) == "Attach Request (0x41)", "NAS formatter returns stable label");
     ok &= expect(vepc::formatS1apProcedureCode(message.procedureCode) == "Initial UE Message (0x0C)", "S1AP formatter returns stable label");
     ok &= expect(vepc::formatS1apProcedureCode(0x0D) == "Downlink NAS Transport (0x0D)", "downlink NAS transport formatter returns stable label");
+    ok &= expect(vepc::formatNasMessageType(0x5D) == "Security Mode Command (0x5D)", "security mode command formatter returns stable label");
+    ok &= expect(vepc::formatNasMessageType(0x5E) == "Security Mode Complete (0x5E)", "security mode complete formatter returns stable label");
+    ok &= expect(vepc::formatNasMessageType(0x42) == "Attach Accept (0x42)", "attach accept formatter returns stable label");
+    ok &= expect(vepc::formatNasMessageType(0x43) == "Attach Complete (0x43)", "attach complete formatter returns stable label");
 
     const std::vector<uint8_t> expectedAuthRequest = {0x52, 0x01};
     ok &= expect(vepc::buildNasAuthenticationRequest() == expectedAuthRequest,
@@ -76,6 +84,38 @@ int main() {
     ok &= expect(authResponse.hasKeySetIdentifier && authResponse.keySetIdentifier == 0x01,
                  "authentication response parser extracts key set identifier");
 
+    const std::vector<uint8_t> expectedSecurityModeCommand = {0x5D, 0x01, 0x01};
+    ok &= expect(vepc::buildNasSecurityModeCommand() == expectedSecurityModeCommand,
+                 "security mode command bytes are stable");
+    ok &= expect(vepc::parseNasSecurityModeCommand(expectedSecurityModeCommand, securityModeCommand, error),
+                 "security mode command parser accepts stable bytes");
+    ok &= expect(securityModeCommand.hasKeySetIdentifier && securityModeCommand.keySetIdentifier == 0x01,
+                 "security mode command parser extracts key set identifier");
+    ok &= expect(securityModeCommand.hasSelectedAlgorithm && securityModeCommand.selectedAlgorithm == 0x01,
+                 "security mode command parser extracts selected algorithm");
+
+    const std::vector<uint8_t> securityModeCompleteBytes = {0x5E, 0x01};
+    ok &= expect(vepc::parseNasSecurityModeComplete(securityModeCompleteBytes, securityModeComplete, error),
+                 "security mode complete parser accepts stable bytes");
+    ok &= expect(securityModeComplete.hasKeySetIdentifier && securityModeComplete.keySetIdentifier == 0x01,
+                 "security mode complete parser extracts key set identifier");
+
+    const std::vector<uint8_t> expectedAttachAccept = {0x42, 0x01, 0x01};
+    ok &= expect(vepc::buildNasAttachAccept() == expectedAttachAccept,
+                 "attach accept bytes are stable");
+    ok &= expect(vepc::parseNasAttachAccept(expectedAttachAccept, attachAccept, error),
+                 "attach accept parser accepts stable bytes");
+    ok &= expect(attachAccept.hasKeySetIdentifier && attachAccept.keySetIdentifier == 0x01,
+                 "attach accept parser extracts key set identifier");
+    ok &= expect(attachAccept.hasAttachResult && attachAccept.attachResult == 0x01,
+                 "attach accept parser extracts attach result");
+
+    const std::vector<uint8_t> attachCompleteBytes = {0x43, 0x01};
+    ok &= expect(vepc::parseNasAttachComplete(attachCompleteBytes, attachComplete, error),
+                 "attach complete parser accepts stable bytes");
+    ok &= expect(attachComplete.hasKeySetIdentifier && attachComplete.keySetIdentifier == 0x01,
+                 "attach complete parser extracts key set identifier");
+
     const std::vector<uint8_t> invalidProcedure = {
         0x0B,
         0x01, 0x03, '1', '2', '3',
@@ -107,6 +147,18 @@ int main() {
                  "wrong NAS message type is rejected for auth request parser");
     ok &= expect(error.find("unexpected NAS message type") != std::string::npos,
                  "wrong NAS message type error is descriptive");
+
+    const std::vector<uint8_t> shortSecurityModeCommand = {0x5D, 0x01};
+    ok &= expect(!vepc::parseNasSecurityModeCommand(shortSecurityModeCommand, securityModeCommand, error),
+                 "short security mode command is rejected");
+    ok &= expect(error.find("too short") != std::string::npos,
+                 "short security mode command error is descriptive");
+
+    const std::vector<uint8_t> shortAttachComplete = {0x43};
+    ok &= expect(!vepc::parseNasAttachComplete(shortAttachComplete, attachComplete, error),
+                 "short attach complete is rejected");
+    ok &= expect(error.find("too short") != std::string::npos,
+                 "short attach complete error is descriptive");
 
     return ok ? 0 : 1;
 }

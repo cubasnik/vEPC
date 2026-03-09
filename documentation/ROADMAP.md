@@ -229,6 +229,34 @@
    - Ожидаемый результат:
       - auth flow получает минимальную state machine и становится пригодным для дальнейшего расширения NAS/security контекста
 
+4. Шаг 2.4: сделано
+   - Файлы: `main.cpp`, `src/s1ap_parser.h`, `src/s1ap_parser.cpp`, `test_s1ap_parser.cpp`
+   - Изменения:
+      - добавить demo parsers и builder для `Security Mode Command (0x5D)` и `Security Mode Complete (0x5E)`
+      - после успешного `Authentication Response` отправлять `Security Mode Command` с тем же `security_context_id`
+      - принимать `Security Mode Complete` только при наличии ожидаемого pending security mode command и совпадающего `security_context_id`
+      - отразить selected NAS algorithm и security-mode progress в `state`
+   - Проверка:
+      - `cmake --build build-win --config Release`
+      - `ctest --test-dir build-win -C Release --output-on-failure`
+      - локальный smoke test `Attach Request -> Authentication Request -> Authentication Response -> Security Mode Command -> Security Mode Complete -> state`
+   - Ожидаемый результат:
+      - UE flow получает второй завершённый NAS/security шаг и становится ближе к последовательному attach demo path
+
+5. Шаг 2.5: сделано
+   - Файлы: `main.cpp`, `src/s1ap_parser.h`, `src/s1ap_parser.cpp`, `test_s1ap_parser.cpp`
+   - Изменения:
+      - добавить demo parsers и builder для `Attach Accept (0x42)` и `Attach Complete (0x43)`
+      - после успешного `Security Mode Complete` отправлять `Attach Accept` с тем же `security_context_id`
+      - принимать `Attach Complete` только при наличии ожидаемого pending attach accept и завершённого security mode
+      - отразить attach progress и финальное `attached` состояние в `state`
+   - Проверка:
+      - `cmake --build build-win --config Release`
+      - `ctest --test-dir build-win -C Release --output-on-failure`
+      - локальный smoke test `Attach Request -> Authentication Request -> Authentication Response -> Security Mode Command -> Security Mode Complete -> Attach Accept -> Attach Complete -> state`
+   - Ожидаемый результат:
+      - demo UE flow получает минимальный завершённый attach-path до финального attached state
+
 ### Этап 3 — Сохранение состояния
 
 Приоритет: `P2`
