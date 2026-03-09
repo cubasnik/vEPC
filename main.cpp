@@ -41,6 +41,7 @@
 // Пути относительно рабочей директории (папки проекта)
 #define LOG_FILE    "build/logs/vepc.log"
 #define RUNTIME_STATE_FILE "build/state/runtime_state.json"
+#define RUNTIME_STATE_SCHEMA_VERSION 2
 #define CONFIG_FILE "config/vepc.config"
 #define MME_CONFIG_FILE "config/vmme.conf"
 #define SGSN_CONFIG_FILE "config/vsgsn.conf"
@@ -741,8 +742,12 @@ static bool extractJsonUintField(const std::string& object,
     if (token.empty()) {
         return false;
     }
-    value = std::stoull(token);
-    return true;
+    try {
+        value = std::stoull(token);
+        return true;
+    } catch (...) {
+        return false;
+    }
 }
 
 static void appendJsonStringField(std::ostringstream& oss,
@@ -1840,11 +1845,36 @@ void VNodeController::clearRuntimeState() {
 
 void VNodeController::saveRuntimeStateToFile() {
     const std::string outputPath = resolveWritableConfigPath(RUNTIME_STATE_FILE);
+    std::map<std::string, bool> interfaceStateCopy;
+    {
+        std::lock_guard<std::mutex> lock(ifaceMutex);
+        interfaceStateCopy = interfaceAdminState;
+    }
 
     std::ostringstream oss;
     oss << "{\n";
-    oss << "  \"schema_version\": 1,\n";
+    oss << "  \"schema_version\": " << RUNTIME_STATE_SCHEMA_VERSION << ",\n";
     oss << "  \"saved_at\": \"" << escapeJsonString(formatTimestamp(std::time(nullptr))) << "\",\n";
+    oss << "  \"metadata\": {\n";
+    appendJsonStringField(oss, "cli_endpoint", CLI_ENDPOINT);
+    appendJsonStringField(oss, "status", getStatus());
+    appendJsonIntField(oss, "interface_admin_state_count", interfaceStateCopy.size(), false);
+    oss << "  },\n";
+    oss << "  \"interface_admin_state\": [\n";
+
+    bool firstInterface = true;
+    for (const auto& [name, adminUp] : interfaceStateCopy) {
+        if (!firstInterface) {
+            oss << ",\n";
+        }
+        firstInterface = false;
+        oss << "    {\n";
+        appendJsonStringField(oss, "name", name);
+        appendJsonBoolField(oss, "admin_up", adminUp, false);
+        oss << "    }";
+    }
+
+    oss << "\n  ],\n";
     oss << "  \"pdp_contexts\": [\n";
 
     {
@@ -1964,20 +1994,57 @@ void VNodeController::loadRuntimeStateFromFile() {
     buffer << stateFile.rdbuf();
     const std::string json = buffer.str();
 
+    uint64_t schemaVersion = 0;
+    if (!extractJsonUintField(json, "schema_version", schemaVersion)) {
+        throw std::runtime_error("Runtime state file is missing schema_version: " + inputPath);
+    }
+    if (schemaVersion != RUNTIME_STATE_SCHEMA_VERSION) {
+        std::ostringstream oss;
+        oss << "Unsupported runtime state schema_version=" << schemaVersion
+            << " (expected=" << RUNTIME_STATE_SCHEMA_VERSION << "): " << inputPath;
+        throw std::runtime_error(oss.str());
+    }
+
+    std::string savedAt;
+    std::time_t savedAtTime = 0;
+    if (!extractJsonStringField(json, "saved_at", savedAt) || !parseTimestamp(savedAt, savedAtTime)) {
+        throw std::runtime_error("Runtime state file has invalid saved_at timestamp: " + inputPath);
+    }
+
     size_t arrayStart = 0;
     size_t arrayEnd = 0;
 
+    std::map<std::string, bool> loadedInterfaceState;
+    if (findJsonArrayBounds(json, "interface_admin_state", arrayStart, arrayEnd)) {
+        const auto objects = splitTopLevelJsonObjects(json.substr(arrayStart, arrayEnd - arrayStart));
+        for (const auto& object : objects) {
+            std::string name;
+            bool adminUp = true;
+            if (!extractJsonStringField(object, "name", name) || name.empty()) {
+                throw std::runtime_error("Runtime state interface_admin_state entry is missing name: " + inputPath);
+            }
+            if (!extractJsonBoolField(object, "admin_up", adminUp)) {
+                throw std::runtime_error("Runtime state interface_admin_state entry is missing admin_up: " + inputPath);
+            }
+            loadedInterfaceState[name] = adminUp;
+        }
+    }
+
     std::vector<PDPContext> loadedPdpContexts;
-    if (findJsonArrayBounds(json, "pdp_contexts", arrayStart, arrayEnd)) {
+    if (!findJsonArrayBounds(json, "pdp_contexts", arrayStart, arrayEnd)) {
+        throw std::runtime_error("Runtime state file is missing pdp_contexts array: " + inputPath);
+    }
+    {
         const auto objects = splitTopLevelJsonObjects(json.substr(arrayStart, arrayEnd - arrayStart));
         for (const auto& object : objects) {
             PDPContext context;
             uint64_t number = 0;
             std::string timestamp;
 
-            if (extractJsonUintField(object, "teid", number)) {
-                context.teid = static_cast<uint32_t>(number);
+            if (!extractJsonUintField(object, "teid", number)) {
+                throw std::runtime_error("Runtime PDP context is missing teid: " + inputPath);
             }
+            context.teid = static_cast<uint32_t>(number);
             if (extractJsonUintField(object, "sequence", number)) {
                 context.sequence = static_cast<uint16_t>(number);
             }
@@ -1992,8 +2059,8 @@ void VNodeController::loadRuntimeStateFromFile() {
             extractJsonStringField(object, "ggsn_ip", context.ggsn_ip);
             extractJsonStringField(object, "imsi", context.imsi);
             extractJsonStringField(object, "apn", context.apn);
-            if (extractJsonStringField(object, "updated_at", timestamp)) {
-                parseTimestamp(timestamp, context.updated_at);
+            if (extractJsonStringField(object, "updated_at", timestamp) && !parseTimestamp(timestamp, context.updated_at)) {
+                throw std::runtime_error("Runtime PDP context has invalid updated_at: " + inputPath);
             }
 
             loadedPdpContexts.push_back(context);
@@ -2001,14 +2068,19 @@ void VNodeController::loadRuntimeStateFromFile() {
     }
 
     std::vector<UEContext> loadedUeContexts;
-    if (findJsonArrayBounds(json, "ue_contexts", arrayStart, arrayEnd)) {
+    if (!findJsonArrayBounds(json, "ue_contexts", arrayStart, arrayEnd)) {
+        throw std::runtime_error("Runtime state file is missing ue_contexts array: " + inputPath);
+    }
+    {
         const auto objects = splitTopLevelJsonObjects(json.substr(arrayStart, arrayEnd - arrayStart));
         for (const auto& object : objects) {
             UEContext context;
             uint64_t number = 0;
             std::string timestamp;
 
-            extractJsonStringField(object, "imsi", context.imsi);
+            if (!extractJsonStringField(object, "imsi", context.imsi) || context.imsi.empty()) {
+                throw std::runtime_error("Runtime UE context is missing imsi: " + inputPath);
+            }
             extractJsonStringField(object, "guti", context.guti);
             extractJsonStringField(object, "peer_id", context.peer_id);
             extractJsonBoolField(object, "authenticated", context.authenticated);
@@ -2055,13 +2127,11 @@ void VNodeController::loadRuntimeStateFromFile() {
                 context.tracking_area_code = static_cast<uint8_t>(number);
             }
             extractJsonBoolField(object, "has_tracking_area_code", context.has_tracking_area_code);
-            if (extractJsonStringField(object, "updated_at", timestamp)) {
-                parseTimestamp(timestamp, context.updated_at);
+            if (extractJsonStringField(object, "updated_at", timestamp) && !parseTimestamp(timestamp, context.updated_at)) {
+                throw std::runtime_error("Runtime UE context has invalid updated_at: " + inputPath);
             }
 
-            if (!context.imsi.empty()) {
-                loadedUeContexts.push_back(context);
-            }
+            loadedUeContexts.push_back(context);
         }
     }
 
@@ -2072,6 +2142,13 @@ void VNodeController::loadRuntimeStateFromFile() {
         }
         for (const auto& context : loadedUeContexts) {
             ueContexts[context.imsi] = context;
+        }
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(ifaceMutex);
+        for (const auto& [name, adminUp] : loadedInterfaceState) {
+            interfaceAdminState[name] = adminUp;
         }
     }
 

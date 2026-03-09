@@ -370,6 +370,19 @@
    - Ожидаемый результат:
       - runtime restart больше не зависит от старых in-memory context и поднимает PDP/UE state из последнего сохранённого JSON snapshot
 
+3. Шаг 3.3: сделано
+   - Файлы: `main.cpp`
+   - Изменения:
+      - валидировать `schema_version`, `saved_at`, `ue_contexts` и `pdp_contexts` при загрузке `runtime_state.json`
+      - расширить JSON snapshot служебной секцией `metadata` и массивом `interface_admin_state`
+      - восстанавливать persisted `interface_admin_state` вместе с UE/PDP contexts при `start()` и `restart()`
+   - Проверка:
+      - `cmake --build build-win --config Release --target vepc`
+      - `ctest --test-dir build-win -C Release --output-on-failure`
+      - локальная проверка `iface_down Gn -> Attach Request -> restart -> build/state/runtime_state.json -> state`
+   - Ожидаемый результат:
+      - runtime_state получает проверяемую версионированную схему и сохраняет не только UE/PDP state, но и административный interface snapshot для более полной диагностики
+
 - Сериализация PDP/UE контекстов в JSON или бинарный файл (при `stop`/`restart`)
 - Загрузка при запуске (опционально)
 - Runtime-состояние интерфейсов уже сохраняется отдельно; следующий шаг здесь именно для PDP/UE-контекстов
