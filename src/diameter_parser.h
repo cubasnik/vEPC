@@ -64,6 +64,26 @@ struct DiameterUpdateLocationRequest {
     bool hasUserName = false;
 };
 
+struct DiameterPurgeUeRequest {
+    DiameterHeader header;
+    std::string originHost;
+    std::string originRealm;
+    std::string userName;
+    bool hasOriginHost = false;
+    bool hasOriginRealm = false;
+    bool hasUserName = false;
+};
+
+struct DiameterCancelLocationRequest {
+    DiameterHeader header;
+    std::string originHost;
+    std::string originRealm;
+    std::string userName;
+    bool hasOriginHost = false;
+    bool hasOriginRealm = false;
+    bool hasUserName = false;
+};
+
 constexpr uint32_t kS6aApplicationId = 16777251;
 
 bool parseDiameterHeader(const std::vector<uint8_t>& packet, DiameterHeader& header, std::string& error);
@@ -111,6 +131,30 @@ std::vector<uint8_t> buildUpdateLocationRequest(const std::string& originHost,
                                                 uint32_t hopByHopId = 0x55556666,
                                                 uint32_t endToEndId = 0x77778888);
 std::vector<uint8_t> buildUpdateLocationAnswer(const DiameterHeader& requestHeader,
+                                               const std::string& originHost,
+                                               const std::string& originRealm,
+                                               uint32_t resultCode = 2001);
+bool parsePurgeUeRequest(const std::vector<uint8_t>& packet,
+                         DiameterPurgeUeRequest& request,
+                         std::string& error);
+std::vector<uint8_t> buildPurgeUeRequest(const std::string& originHost,
+                                         const std::string& originRealm,
+                                         const std::string& userName,
+                                         uint32_t hopByHopId = 0x88889999,
+                                         uint32_t endToEndId = 0xAAAABBBB);
+std::vector<uint8_t> buildPurgeUeAnswer(const DiameterHeader& requestHeader,
+                                        const std::string& originHost,
+                                        const std::string& originRealm,
+                                        uint32_t resultCode = 2001);
+bool parseCancelLocationRequest(const std::vector<uint8_t>& packet,
+                                DiameterCancelLocationRequest& request,
+                                std::string& error);
+std::vector<uint8_t> buildCancelLocationRequest(const std::string& originHost,
+                                                const std::string& originRealm,
+                                                const std::string& userName,
+                                                uint32_t hopByHopId = 0xBBBBCCCC,
+                                                uint32_t endToEndId = 0xDDDDEEEE);
+std::vector<uint8_t> buildCancelLocationAnswer(const DiameterHeader& requestHeader,
                                                const std::string& originHost,
                                                const std::string& originRealm,
                                                uint32_t resultCode = 2001);

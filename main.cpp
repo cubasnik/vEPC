@@ -1954,6 +1954,58 @@ void VNodeController::interfaceEndpointThread(InterfaceConfigEntry entry) {
                             }
                             runtimeState.lastDetail = ulrDetail.str();
                             diameterDetailForLog = ulrDetail.str();
+                        } else if (header.commandCode == 321 && header.request) {
+                            vepc::DiameterPurgeUeRequest pur;
+                            if (!vepc::parsePurgeUeRequest(packet, pur, parseError)) {
+                                runtimeState.lastMessage = "Rejected Diameter";
+                                runtimeState.lastDetail = parseError;
+                                setInterfaceEndpointState(endpointKey, runtimeState);
+                                log("S6A", "Rejected Diameter PUR from " + peerIp + ": " + parseError);
+                                closeNativeSocket(clientSocket);
+                                continue;
+                            }
+
+                            std::ostringstream purDetail;
+                            if (pur.hasUserName) {
+                                purDetail << "imsi=" << pur.userName;
+                            }
+                            if (pur.hasOriginHost) {
+                                if (purDetail.tellp() > 0) {
+                                    purDetail << ", ";
+                                }
+                                purDetail << "origin_host=" << pur.originHost;
+                            }
+                            if (purDetail.tellp() <= 0) {
+                                purDetail << "no User-Name/Origin-Host AVPs";
+                            }
+                            runtimeState.lastDetail = purDetail.str();
+                            diameterDetailForLog = purDetail.str();
+                        } else if (header.commandCode == 317 && header.request) {
+                            vepc::DiameterCancelLocationRequest clr;
+                            if (!vepc::parseCancelLocationRequest(packet, clr, parseError)) {
+                                runtimeState.lastMessage = "Rejected Diameter";
+                                runtimeState.lastDetail = parseError;
+                                setInterfaceEndpointState(endpointKey, runtimeState);
+                                log("S6A", "Rejected Diameter CLR from " + peerIp + ": " + parseError);
+                                closeNativeSocket(clientSocket);
+                                continue;
+                            }
+
+                            std::ostringstream clrDetail;
+                            if (clr.hasUserName) {
+                                clrDetail << "imsi=" << clr.userName;
+                            }
+                            if (clr.hasOriginHost) {
+                                if (clrDetail.tellp() > 0) {
+                                    clrDetail << ", ";
+                                }
+                                clrDetail << "origin_host=" << clr.originHost;
+                            }
+                            if (clrDetail.tellp() <= 0) {
+                                clrDetail << "no User-Name/Origin-Host AVPs";
+                            }
+                            runtimeState.lastDetail = clrDetail.str();
+                            diameterDetailForLog = clrDetail.str();
                         }
 
                         setInterfaceEndpointState(endpointKey, runtimeState);
@@ -2101,6 +2153,62 @@ void VNodeController::interfaceEndpointThread(InterfaceConfigEntry entry) {
                                 std::ostringstream responseLog;
                                 responseLog << "Sent Diameter response to " << peerIp
                                             << ": command=" << vepc::formatDiameterCommand(316, false)
+                                            << ", bytes=" << response.size();
+                                log("S6A", responseLog.str());
+                            } else {
+                                log("S6A", "Failed to send Diameter response to " + peerIp + ": " + getSocketErrorText());
+                            }
+                        } else if (header.commandCode == 321 && header.request) {
+                            const std::string hssHost = config.count("s6a-hss-host") != 0 && !config.at("s6a-hss-host").empty()
+                                ? config.at("s6a-hss-host")
+                                : "hss.vepc.local";
+                            const std::string hssRealm = config.count("s6a-hss-realm") != 0 && !config.at("s6a-hss-realm").empty()
+                                ? config.at("s6a-hss-realm")
+                                : "epc.mnc001.mcc001.3gppnetwork.org";
+                            const std::vector<uint8_t> response = vepc::buildPurgeUeAnswer(header, hssHost, hssRealm);
+#ifdef _WIN32
+                            const int sent = send(clientSocket,
+                                                  reinterpret_cast<const char*>(response.data()),
+                                                  static_cast<int>(response.size()),
+                                                  0);
+#else
+                            const int sent = static_cast<int>(send(clientSocket,
+                                                                   response.data(),
+                                                                   response.size(),
+                                                                   0));
+#endif
+                            if (sent == static_cast<int>(response.size())) {
+                                std::ostringstream responseLog;
+                                responseLog << "Sent Diameter response to " << peerIp
+                                            << ": command=" << vepc::formatDiameterCommand(321, false)
+                                            << ", bytes=" << response.size();
+                                log("S6A", responseLog.str());
+                            } else {
+                                log("S6A", "Failed to send Diameter response to " + peerIp + ": " + getSocketErrorText());
+                            }
+                        } else if (header.commandCode == 317 && header.request) {
+                            const std::string hssHost = config.count("s6a-hss-host") != 0 && !config.at("s6a-hss-host").empty()
+                                ? config.at("s6a-hss-host")
+                                : "hss.vepc.local";
+                            const std::string hssRealm = config.count("s6a-hss-realm") != 0 && !config.at("s6a-hss-realm").empty()
+                                ? config.at("s6a-hss-realm")
+                                : "epc.mnc001.mcc001.3gppnetwork.org";
+                            const std::vector<uint8_t> response = vepc::buildCancelLocationAnswer(header, hssHost, hssRealm);
+#ifdef _WIN32
+                            const int sent = send(clientSocket,
+                                                  reinterpret_cast<const char*>(response.data()),
+                                                  static_cast<int>(response.size()),
+                                                  0);
+#else
+                            const int sent = static_cast<int>(send(clientSocket,
+                                                                   response.data(),
+                                                                   response.size(),
+                                                                   0));
+#endif
+                            if (sent == static_cast<int>(response.size())) {
+                                std::ostringstream responseLog;
+                                responseLog << "Sent Diameter response to " << peerIp
+                                            << ": command=" << vepc::formatDiameterCommand(317, false)
                                             << ", bytes=" << response.size();
                                 log("S6A", responseLog.str());
                             } else {

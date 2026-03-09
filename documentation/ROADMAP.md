@@ -671,6 +671,22 @@
    - Ожидаемый результат:
       - `S6a` получает первые прикладные Diameter процедуры поверх завершённого базового peer lifecycle, в которых MME отправляет запросы аутентификации и обновления локации к HSS, а runtime telemetry отражает IMSI и Origin-Host из каждого сообщения
 
+17. Шаг 5.17: сделано
+   - Файлы: `main.cpp`, `src/diameter_parser.h`, `src/diameter_parser.cpp`, `test_diameter_parser.cpp`, `test_s6a_diameter_client.cpp`, `cmake/TestS6aPurge.cmake`, `cmake/TestS6aCancelLocation.cmake`, `CMakeLists.txt`
+   - Изменения:
+      - добавить следующие прикладные S6a сообщения: `Purge-UE-Request/Answer` (`PUR/PUA`, command 321) и `Cancel-Location-Request/Answer` (`CLR/CLA`, command 317) — процедуры 3GPP TS 29.272 для управления жизненным циклом абонента между MME и HSS
+      - парсер: `DiameterPurgeUeRequest` и `DiameterCancelLocationRequest` с `Origin-Host`, `Origin-Realm` и `User-Name` (IMSI); `parsePurgeUeRequest()`, `buildPurgeUeRequest()`, `buildPurgeUeAnswer()` для command 321; `parseCancelLocationRequest()`, `buildCancelLocationRequest()`, `buildCancelLocationAnswer()` для command 317; оба сообщения используют флаги `0xC0` (Request + Proxiable), `app_id = 16777251`; `formatDiameterCommand()` распознаёт commands 321 и 317
+      - runtime: `S6a` TCP handler обрабатывает PUR — парсит AVP, извлекает IMSI и Origin-Host в telemetry detail, отправляет PUA; аналогично для CLR → CLA
+      - тест-клиент: режим `purge` — выполняет CER→CEA→PUR→PUA; режим `cancel` — выполняет CER→CEA→CLR→CLA; оба валидируют command code, answer flag и S6a application-id
+      - smoke `s6a-purge-smoke` доказывает PUR roundtrip, проверяет `Last Message: PUR`, `Last Detail: imsi=...` и логи PUR/PUA
+      - smoke `s6a-cancel-location-smoke` доказывает CLR roundtrip, проверяет `Last Message: CLR`, `Last Detail: imsi=...` и логи CLR/CLA
+   - Проверка:
+      - `cmake --build build-win --config Release`
+      - `ctest --test-dir build-win -C Release -R "diameter-parser-smoke|s6a-(telemetry|watchdog|disconnect|auth|location|purge|cancel-location)-smoke" --output-on-failure`
+      - `ctest --test-dir build-win -C Release --output-on-failure`
+   - Ожидаемый результат:
+      - `S6a` получает следующие прикладные Diameter процедуры для управления жизненным циклом абонента: PUR (MME уведомляет HSS об удалении UE) и CLR (HSS отменяет локацию абонента на MME), с извлечением IMSI и Origin-Host в runtime telemetry
+
 ## Ближайший план (рекомендуемый порядок)
 
 1. Закрыть `Этап 0.6`: help по режимам, структурированные обёртки для всех runtime-команд, стабильные smoke tests.

@@ -220,5 +220,65 @@ int main() {
     ok &= expect(vepc::formatDiameterCommand(header.commandCode, header.request) == "Update-Location-Answer (ULA)",
                  "diameter formatter recognizes ULA");
 
+    // PUR builder / parser tests
+    const std::vector<uint8_t> pur = vepc::buildPurgeUeRequest("mme.vepc.local",
+                                                                "epc.mnc001.mcc001.3gppnetwork.org",
+                                                                "001010123456789");
+    ok &= expect(vepc::parseDiameterHeader(pur, header, error), "diameter pur header parses");
+    ok &= expect(header.commandCode == 321, "diameter pur has command 321");
+    ok &= expect(header.request, "diameter pur has request flag");
+    ok &= expect(header.applicationId == vepc::kS6aApplicationId, "diameter pur has s6a app id");
+    ok &= expect(vepc::formatDiameterCommand(header.commandCode, header.request) == "Purge-UE-Request (PUR)",
+                 "diameter formatter recognizes PUR");
+
+    vepc::DiameterPurgeUeRequest purRequest;
+    ok &= expect(vepc::parsePurgeUeRequest(pur, purRequest, error), "diameter pur avps parse");
+    ok &= expect(purRequest.hasOriginHost && purRequest.originHost == "mme.vepc.local",
+                 "diameter pur origin-host parses");
+    ok &= expect(purRequest.hasOriginRealm && purRequest.originRealm == "epc.mnc001.mcc001.3gppnetwork.org",
+                 "diameter pur origin-realm parses");
+    ok &= expect(purRequest.hasUserName && purRequest.userName == "001010123456789",
+                 "diameter pur user-name parses");
+
+    // PUA builder test
+    const std::vector<uint8_t> pua = vepc::buildPurgeUeAnswer(header, "hss.vepc.local",
+                                                               "epc.mnc001.mcc001.3gppnetwork.org");
+    ok &= expect(vepc::parseDiameterHeader(pua, header, error), "diameter pua header parses");
+    ok &= expect(header.commandCode == 321, "diameter pua has command 321");
+    ok &= expect(!header.request, "diameter pua has answer flag");
+    ok &= expect(header.applicationId == vepc::kS6aApplicationId, "diameter pua has s6a app id");
+    ok &= expect(vepc::formatDiameterCommand(header.commandCode, header.request) == "Purge-UE-Answer (PUA)",
+                 "diameter formatter recognizes PUA");
+
+    // CLR builder / parser tests
+    const std::vector<uint8_t> clr = vepc::buildCancelLocationRequest("mme.vepc.local",
+                                                                       "epc.mnc001.mcc001.3gppnetwork.org",
+                                                                       "001010123456789");
+    ok &= expect(vepc::parseDiameterHeader(clr, header, error), "diameter clr header parses");
+    ok &= expect(header.commandCode == 317, "diameter clr has command 317");
+    ok &= expect(header.request, "diameter clr has request flag");
+    ok &= expect(header.applicationId == vepc::kS6aApplicationId, "diameter clr has s6a app id");
+    ok &= expect(vepc::formatDiameterCommand(header.commandCode, header.request) == "Cancel-Location-Request (CLR)",
+                 "diameter formatter recognizes CLR");
+
+    vepc::DiameterCancelLocationRequest clrRequest;
+    ok &= expect(vepc::parseCancelLocationRequest(clr, clrRequest, error), "diameter clr avps parse");
+    ok &= expect(clrRequest.hasOriginHost && clrRequest.originHost == "mme.vepc.local",
+                 "diameter clr origin-host parses");
+    ok &= expect(clrRequest.hasOriginRealm && clrRequest.originRealm == "epc.mnc001.mcc001.3gppnetwork.org",
+                 "diameter clr origin-realm parses");
+    ok &= expect(clrRequest.hasUserName && clrRequest.userName == "001010123456789",
+                 "diameter clr user-name parses");
+
+    // CLA builder test
+    const std::vector<uint8_t> cla = vepc::buildCancelLocationAnswer(header, "hss.vepc.local",
+                                                                      "epc.mnc001.mcc001.3gppnetwork.org");
+    ok &= expect(vepc::parseDiameterHeader(cla, header, error), "diameter cla header parses");
+    ok &= expect(header.commandCode == 317, "diameter cla has command 317");
+    ok &= expect(!header.request, "diameter cla has answer flag");
+    ok &= expect(header.applicationId == vepc::kS6aApplicationId, "diameter cla has s6a app id");
+    ok &= expect(vepc::formatDiameterCommand(header.commandCode, header.request) == "Cancel-Location-Answer (CLA)",
+                 "diameter formatter recognizes CLA");
+
     return ok ? 0 : 1;
 }
