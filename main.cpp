@@ -1785,14 +1785,21 @@ void VNodeController::interfaceEndpointThread(InterfaceConfigEntry entry) {
 #ifdef _WIN32
             DWORD timeoutMs = 1500;
             setsockopt(clientSocket, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeoutMs), sizeof(timeoutMs));
-            const int received = recv(clientSocket, buffer.data(), static_cast<int>(buffer.size()), 0);
 #else
             timeval receiveTimeout{};
             receiveTimeout.tv_sec = 1;
             receiveTimeout.tv_usec = 500000;
             setsockopt(clientSocket, SOL_SOCKET, SO_RCVTIMEO, &receiveTimeout, sizeof(receiveTimeout));
+#endif
+
+            bool keepConnection = true;
+            while (keepConnection && running) {
+#ifdef _WIN32
+            const int received = recv(clientSocket, buffer.data(), static_cast<int>(buffer.size()), 0);
+#else
             const int received = static_cast<int>(recv(clientSocket, buffer.data(), buffer.size(), 0));
 #endif
+            keepConnection = false;
 
             if (received > 0) {
                 runtimeState.receivedPackets += 1;
@@ -1849,6 +1856,25 @@ void VNodeController::interfaceEndpointThread(InterfaceConfigEntry entry) {
 
                             runtimeState.lastDetail = cerDetail.str();
                             diameterDetailForLog = runtimeState.lastDetail;
+                        } else if (header.commandCode == 280 && header.request) {
+                            vepc::DiameterWatchdogRequest dwr;
+                            if (!vepc::parseWatchdogRequest(packet, dwr, parseError)) {
+                                runtimeState.lastMessage = "Rejected Diameter";
+                                runtimeState.lastDetail = parseError;
+                                setInterfaceEndpointState(endpointKey, runtimeState);
+                                log("S6A", "Rejected Diameter DWR from " + peerIp + ": " + parseError);
+                                closeNativeSocket(clientSocket);
+                                continue;
+                            }
+
+                            std::string dwrDetail;
+                            if (dwr.hasOriginHost) {
+                                dwrDetail = "origin_host=" + dwr.originHost;
+                            } else {
+                                dwrDetail = "no Origin-Host AVP";
+                            }
+                            runtimeState.lastDetail = dwrDetail;
+                            diameterDetailForLog = dwrDetail;
                         }
 
                         setInterfaceEndpointState(endpointKey, runtimeState);
@@ -1894,12 +1920,39 @@ void VNodeController::interfaceEndpointThread(InterfaceConfigEntry entry) {
                             } else {
                                 log("S6A", "Failed to send Diameter response to " + peerIp + ": " + getSocketErrorText());
                             }
+                        } else if (header.commandCode == 280 && header.request) {
+                            const std::string hssHost = config.count("s6a-hss-host") != 0 && !config.at("s6a-hss-host").empty()
+                                ? config.at("s6a-hss-host")
+                                : "hss.vepc.local";
+                            const std::vector<uint8_t> response = vepc::buildWatchdogAnswer(header, hssHost);
+#ifdef _WIN32
+                            const int sent = send(clientSocket,
+                                                  reinterpret_cast<const char*>(response.data()),
+                                                  static_cast<int>(response.size()),
+                                                  0);
+#else
+                            const int sent = static_cast<int>(send(clientSocket,
+                                                                   response.data(),
+                                                                   response.size(),
+                                                                   0));
+#endif
+                            if (sent == static_cast<int>(response.size())) {
+                                std::ostringstream responseLog;
+                                responseLog << "Sent Diameter response to " << peerIp
+                                            << ": command=" << vepc::formatDiameterCommand(280, false)
+                                            << ", bytes=" << response.size();
+                                log("S6A", responseLog.str());
+                            } else {
+                                log("S6A", "Failed to send Diameter response to " + peerIp + ": " + getSocketErrorText());
+                            }
                         }
                     }
+                    keepConnection = (entry.name == "S6a");
                 }
             } else if (received < 0 && running) {
                 log("MAIN", "Interface endpoint " + entry.name + " recv() failed: " + getSocketErrorText());
             }
+            }  // end while keepConnection
 
             closeNativeSocket(clientSocket);
         }

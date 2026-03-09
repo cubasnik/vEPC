@@ -625,6 +625,21 @@
    - Ожидаемый результат:
       - `S6a` перестаёт быть только placeholder listener и получает первый наблюдаемый runtime roundtrip для Diameter `CER/CEA` с минимально полезным AVP-содержимым и извлечением `Origin-Host`/`Origin-Realm` в runtime telemetry, не пытаясь пока эмулировать полный HSS workflow
 
+14. Шаг 5.14: сделано
+   - Файлы: `main.cpp`, `src/diameter_parser.h`, `src/diameter_parser.cpp`, `test_diameter_parser.cpp`, `test_s6a_diameter_client.cpp`, `cmake/TestS6aWatchdog.cmake`, `CMakeLists.txt`
+   - Изменения:
+      - добавить поддержку `Device-Watchdog-Request/Answer` (`DWR/DWA`, command 280) — обязательный механизм RFC 6733 для поддержания Diameter peer-соединения
+      - парсер: `parseWatchdogRequest()` извлекает `Origin-Host` из `DWR`; `buildWatchdogRequest()` и `buildWatchdogAnswer()` формируют стабильные байтовые последовательности; `formatDiameterCommand()` распознаёт command 280
+      - runtime: `S6a` TCP-соединение теперь поддерживает цикл чтения нескольких сообщений на одном соединении (CER → DWR → ...), а не закрывается после первого сообщения
+      - тест-клиент: режим `watchdog` — отправляет `CER`, получает `CEA`, затем отправляет `DWR` на том же соединении и валидирует `DWA`
+      - smoke `s6a-watchdog-smoke` доказывает `CER+DWR` roundtrip, проверяет `Last Message: DWR`, `Last Detail: origin_host=...` и логи DWR/DWA
+   - Проверка:
+      - `cmake --build build-win --config Release`
+      - `ctest --test-dir build-win -C Release -R "diameter-parser-smoke|s6a-(telemetry|watchdog)-smoke" --output-on-failure`
+      - `ctest --test-dir build-win -C Release --output-on-failure`
+   - Ожидаемый результат:
+      - `S6a` поддерживает persistent Diameter peer session с CER/CEA + DWR/DWA, что является обязательной основой перед добавлением прикладных сообщений (AIR/AIA, ULR/ULA)
+
 ## Ближайший план (рекомендуемый порядок)
 
 1. Закрыть `Этап 0.6`: help по режимам, структурированные обёртки для всех runtime-команд, стабильные smoke tests.

@@ -83,6 +83,15 @@ add_test(
         -P ${CMAKE_SOURCE_DIR}/cmake/TestS6aTelemetry.cmake
 )
 add_test(
+    NAME s6a-watchdog-smoke
+    COMMAND ${CMAKE_COMMAND}
+        -DVEPC_EXE=$<TARGET_FILE:vepc>
+        -DRUNTIME_CLI_EXE=$<TARGET_FILE:test-runtime-cli>
+        -DS6A_DIAMETER_CLIENT_EXE=$<TARGET_FILE:test-s6a-diameter-client>
+        -DSOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -P ${CMAKE_SOURCE_DIR}/cmake/TestS6aWatchdog.cmake
+)
+add_test(
     NAME s11-telemetry-smoke
     COMMAND ${CMAKE_COMMAND}
         -DVEPC_EXE=$<TARGET_FILE:vepc>

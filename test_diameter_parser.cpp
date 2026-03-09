@@ -116,5 +116,26 @@ int main() {
     ok &= expect(!vepc::parseCapabilitiesExchangeRequest(malformedCer, cerRequest, error), "malformed cer avp length is rejected");
     ok &= expect(error.find("invalid Diameter AVP length") != std::string::npos, "malformed cer avp error is descriptive");
 
+    // DWR builder / parser tests
+    const std::vector<uint8_t> dwr = vepc::buildWatchdogRequest("mme.vepc.local");
+    ok &= expect(vepc::parseDiameterHeader(dwr, header, error), "diameter dwr header parses");
+    ok &= expect(header.commandCode == 280, "diameter dwr has command 280");
+    ok &= expect(header.request, "diameter dwr has request flag");
+    ok &= expect(vepc::formatDiameterCommand(header.commandCode, header.request) == "Device-Watchdog-Request (DWR)",
+                 "diameter formatter recognizes DWR");
+
+    vepc::DiameterWatchdogRequest dwrRequest;
+    ok &= expect(vepc::parseWatchdogRequest(dwr, dwrRequest, error), "diameter dwr avps parse");
+    ok &= expect(dwrRequest.hasOriginHost && dwrRequest.originHost == "mme.vepc.local",
+                 "diameter dwr origin-host parses");
+
+    // DWA builder test
+    const std::vector<uint8_t> dwa = vepc::buildWatchdogAnswer(header, "hss.vepc.local");
+    ok &= expect(vepc::parseDiameterHeader(dwa, header, error), "diameter dwa header parses");
+    ok &= expect(header.commandCode == 280, "diameter dwa has command 280");
+    ok &= expect(!header.request, "diameter dwa has answer flag");
+    ok &= expect(vepc::formatDiameterCommand(header.commandCode, header.request) == "Device-Watchdog-Answer (DWA)",
+                 "diameter formatter recognizes DWA");
+
     return ok ? 0 : 1;
 }
