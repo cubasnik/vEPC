@@ -34,10 +34,10 @@ int main() {
         'm', 'm', 'e', '.', 'v', 'e', 'p', 'c', '.', 'l', 'o', 'c', 'a', 'l',
         0x00, 0x00,
         0x00, 0x00, 0x01, 0x28,
-        0x40, 0x00, 0x00, 0x2B,
+        0x40, 0x00, 0x00, 0x29,
         'e', 'p', 'c', '.', 'm', 'n', 'c', '0', '0', '1', '.', 'm', 'c', 'c', '0', '0', '1', '.',
         '3', 'g', 'p', 'p', 'n', 'e', 't', 'w', 'o', 'r', 'k', '.', 'o', 'r', 'g',
-        0x00,
+        0x00, 0x00, 0x00,
     };
     const std::vector<uint8_t> cer = vepc::buildCapabilitiesExchangeRequest("mme.vepc.local",
                                                                              "epc.mnc001.mcc001.3gppnetwork.org");
