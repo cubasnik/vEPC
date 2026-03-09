@@ -38,3 +38,4 @@ Testing/
 
 # Logs and temporary runtime files
 *.log
+config/interface_admin_state.conf

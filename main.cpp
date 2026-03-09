@@ -463,6 +463,21 @@ static std::string formatTimestamp(std::time_t value) {
     return buffer;
 }
 
+static std::string formatTimestampForFilename(std::time_t value) {
+    if (value == 0) {
+        value = std::time(nullptr);
+    }
+
+    char buffer[64]{};
+    std::tm localTime{};
+    if (!tryGetLocalTime(value, localTime)) {
+        return "unknown-time";
+    }
+
+    std::strftime(buffer, sizeof(buffer), "%Y%m%d-%H%M%S", &localTime);
+    return buffer;
+}
+
 static bool parseTimestamp(const std::string& value, std::time_t& result) {
     result = 0;
     if (value.empty() || value == "n/a") {
@@ -748,6 +763,161 @@ static bool extractJsonUintField(const std::string& object,
     } catch (...) {
         return false;
     }
+}
+
+static bool validateLoadedPdpContext(const PDPContext& context, std::string& error) {
+    error.clear();
+    if (context.teid == 0) {
+        error = "missing non-zero teid";
+        return false;
+    }
+    if (context.last_message_type == 0) {
+        error = "missing last_message_type";
+        return false;
+    }
+    if (context.peer_ip.empty()) {
+        error = "missing peer_ip";
+        return false;
+    }
+    if (context.imsi.empty()) {
+        error = "missing imsi";
+        return false;
+    }
+    if (context.apn.empty()) {
+        error = "missing apn";
+        return false;
+    }
+    if (context.has_pdp_type && context.pdp_type == 0) {
+        error = "has_pdp_type is true but pdp_type is zero";
+        return false;
+    }
+    if (context.updated_at == 0) {
+        error = "missing updated_at";
+        return false;
+    }
+    return true;
+}
+
+static bool validateLoadedUeContext(const UEContext& context, std::string& error) {
+    error.clear();
+    if (context.imsi.empty()) {
+        error = "missing imsi";
+        return false;
+    }
+    if (context.updated_at == 0) {
+        error = "missing updated_at";
+        return false;
+    }
+    if (context.has_last_nas_message_type && context.last_nas_message_type == 0) {
+        error = "has_last_nas_message_type is true but last_nas_message_type is zero";
+        return false;
+    }
+    if (context.has_selected_nas_algorithm && context.selected_nas_algorithm == 0) {
+        error = "has_selected_nas_algorithm is true but selected_nas_algorithm is zero";
+        return false;
+    }
+    if (context.has_default_bearer_id && context.default_bearer_id == 0) {
+        error = "has_default_bearer_id is true but default_bearer_id is zero";
+        return false;
+    }
+    if (context.has_tracking_area_code && context.tracking_area_code == 0) {
+        error = "has_tracking_area_code is true but tracking_area_code is zero";
+        return false;
+    }
+    if (context.auth_response_received && !context.auth_request_sent) {
+        error = "auth_response_received requires auth_request_sent";
+        return false;
+    }
+    if (context.security_mode_complete && !context.security_mode_command_sent) {
+        error = "security_mode_complete requires security_mode_command_sent";
+        return false;
+    }
+    if (context.attach_complete_received && !context.attach_accept_sent) {
+        error = "attach_complete_received requires attach_accept_sent";
+        return false;
+    }
+    if (context.attached && !context.attach_complete_received) {
+        error = "attached requires attach_complete_received";
+        return false;
+    }
+    if (context.service_active && (!context.attached || !context.has_default_bearer_id)) {
+        error = "service_active requires attached state and default bearer id";
+        return false;
+    }
+    if (context.service_resume_accept_sent && !context.service_active) {
+        error = "service_resume_accept_sent requires service_active";
+        return false;
+    }
+    if (context.tracking_area_update_complete_received && (!context.attached || !context.has_tracking_area_code)) {
+        error = "TAU complete requires attached state and tracking area code";
+        return false;
+    }
+    if (context.detached) {
+        if (context.attached || context.authenticated || context.service_active) {
+            error = "detached context cannot remain attached/authenticated/service-active";
+            return false;
+        }
+        if (context.has_security_context_id || context.has_default_bearer_id || context.has_tracking_area_code) {
+            error = "detached context cannot retain security, bearer, or tracking area data";
+            return false;
+        }
+    }
+
+    const bool requiresSecurityContext = context.auth_request_sent
+        || context.auth_response_received
+        || context.security_mode_command_sent
+        || context.security_mode_complete
+        || context.attach_accept_sent
+        || context.attach_complete_received
+        || context.attached
+        || context.service_request_received
+        || context.service_accept_sent
+        || context.service_active
+        || context.service_resume_request_received
+        || context.service_resume_accept_sent
+        || context.service_release_request_received
+        || context.service_release_complete_sent
+        || context.tracking_area_update_request_received
+        || context.tracking_area_update_accept_sent
+        || context.tracking_area_update_complete_received;
+    if (requiresSecurityContext && !context.detached && !context.has_security_context_id) {
+        error = "active UE flow requires security_context_id";
+        return false;
+    }
+
+    return true;
+}
+
+static std::string quarantineRuntimeStateFile(const std::string& inputPath) {
+    const std::filesystem::path sourcePath(inputPath);
+    if (!std::filesystem::exists(sourcePath)) {
+        return "";
+    }
+
+    const std::string suffix = ".corrupt-" + formatTimestampForFilename(std::time(nullptr));
+    const std::filesystem::path destinationPath = sourcePath.parent_path() /
+        (sourcePath.stem().string() + suffix + sourcePath.extension().string());
+
+    std::error_code error;
+    std::filesystem::rename(sourcePath, destinationPath, error);
+    if (!error) {
+        return destinationPath.string();
+    }
+
+    std::filesystem::copy_file(sourcePath,
+                               destinationPath,
+                               std::filesystem::copy_options::overwrite_existing,
+                               error);
+    if (error) {
+        throw std::runtime_error("Failed to quarantine runtime state file: " + inputPath);
+    }
+
+    std::filesystem::remove(sourcePath, error);
+    if (error) {
+        throw std::runtime_error("Failed to remove original corrupt runtime state file: " + inputPath);
+    }
+
+    return destinationPath.string();
 }
 
 static void appendJsonStringField(std::ostringstream& oss,
@@ -2016,6 +2186,11 @@ void VNodeController::loadRuntimeStateFromFile() {
 
     std::map<std::string, bool> loadedInterfaceState;
     if (findJsonArrayBounds(json, "interface_admin_state", arrayStart, arrayEnd)) {
+        std::set<std::string> validInterfaces;
+        for (const auto& entry : loadInterfaceConfigEntries()) {
+            validInterfaces.insert(entry.name);
+        }
+
         const auto objects = splitTopLevelJsonObjects(json.substr(arrayStart, arrayEnd - arrayStart));
         for (const auto& object : objects) {
             std::string name;
@@ -2025,6 +2200,9 @@ void VNodeController::loadRuntimeStateFromFile() {
             }
             if (!extractJsonBoolField(object, "admin_up", adminUp)) {
                 throw std::runtime_error("Runtime state interface_admin_state entry is missing admin_up: " + inputPath);
+            }
+            if (!validInterfaces.empty() && validInterfaces.find(name) == validInterfaces.end()) {
+                throw std::runtime_error("Runtime state interface_admin_state entry references unknown interface: " + name);
             }
             loadedInterfaceState[name] = adminUp;
         }
@@ -2061,6 +2239,16 @@ void VNodeController::loadRuntimeStateFromFile() {
             extractJsonStringField(object, "apn", context.apn);
             if (extractJsonStringField(object, "updated_at", timestamp) && !parseTimestamp(timestamp, context.updated_at)) {
                 throw std::runtime_error("Runtime PDP context has invalid updated_at: " + inputPath);
+            }
+            std::string validationError;
+            if (!validateLoadedPdpContext(context, validationError)) {
+                throw std::runtime_error("Runtime PDP context validation failed for TEID 0x"
+                    + [&context]() {
+                        std::ostringstream oss;
+                        oss << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << context.teid;
+                        return oss.str();
+                    }()
+                    + ": " + validationError);
             }
 
             loadedPdpContexts.push_back(context);
@@ -2129,6 +2317,10 @@ void VNodeController::loadRuntimeStateFromFile() {
             extractJsonBoolField(object, "has_tracking_area_code", context.has_tracking_area_code);
             if (extractJsonStringField(object, "updated_at", timestamp) && !parseTimestamp(timestamp, context.updated_at)) {
                 throw std::runtime_error("Runtime UE context has invalid updated_at: " + inputPath);
+            }
+            std::string validationError;
+            if (!validateLoadedUeContext(context, validationError)) {
+                throw std::runtime_error("Runtime UE context validation failed for IMSI " + context.imsi + ": " + validationError);
             }
 
             loadedUeContexts.push_back(context);
@@ -3419,6 +3611,16 @@ void VNodeController::start() {
     try {
         loadRuntimeStateFromFile();
     } catch (const std::exception& ex) {
+        clearRuntimeState();
+        const std::string inputPath = resolveWritableConfigPath(RUNTIME_STATE_FILE);
+        try {
+            const std::string quarantinePath = quarantineRuntimeStateFile(inputPath);
+            if (!quarantinePath.empty()) {
+                log("MAIN", "Corrupt runtime state moved to " + quarantinePath);
+            }
+        } catch (const std::exception& quarantineEx) {
+            log("MAIN", std::string("Failed to quarantine runtime state: ") + quarantineEx.what());
+        }
         log("MAIN", std::string("Failed to load runtime state: ") + ex.what());
     }
 

@@ -383,6 +383,19 @@
    - Ожидаемый результат:
       - runtime_state получает проверяемую версионированную схему и сохраняет не только UE/PDP state, но и административный interface snapshot для более полной диагностики
 
+4. Шаг 3.4: сделано
+   - Файлы: `main.cpp`, `.gitignore`
+   - Изменения:
+      - добавить дополнительную валидацию согласованности загружаемых UE/PDP context, чтобы битый snapshot отбрасывался до частичного восстановления
+      - при ошибке загрузки переносить поврежденный `build/state/runtime_state.json` в quarantine-файл `runtime_state.corrupt-<timestamp>.json`
+      - исключить `config/interface_admin_state.conf` из git, чтобы runtime admin-state не создавал шум в рабочем дереве
+   - Проверка:
+      - `cmake --build build-win --config Release --target vepc`
+      - `ctest --test-dir build-win -C Release --output-on-failure`
+      - локальная проверка `подложить битый runtime_state.json -> start -> build/state/runtime_state.corrupt-*.json`
+   - Ожидаемый результат:
+      - старт не застревает на поврежденном state-файле, переносит его в quarantine и продолжает работу с пустым runtime-state
+
 - Сериализация PDP/UE контекстов в JSON или бинарный файл (при `stop`/`restart`)
 - Загрузка при запуске (опционально)
 - Runtime-состояние интерфейсов уже сохраняется отдельно; следующий шаг здесь именно для PDP/UE-контекстов
