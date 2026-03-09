@@ -27,6 +27,7 @@
 #include <clocale>
 #include <filesystem>
 
+#include "src/diameter_parser.h"
 #include "src/gtp_parser.h"
 #include "src/s1ap_parser.h"
 
@@ -143,6 +144,8 @@ struct InterfaceEndpointRuntime {
     uint64_t    receivedBytes = 0;
     std::string lastPeer;
     std::time_t lastActivityAt = 0;
+    std::string lastMessage;
+    std::string lastDetail;
     std::string reason;
 };
 
@@ -1735,8 +1738,170 @@ void VNodeController::interfaceEndpointThread(InterfaceConfigEntry entry) {
             }
         }
     } else {
+        std::vector<char> buffer(4096);
         while (running) {
-            std::this_thread::sleep_for(std::chrono::seconds(1));
+            fd_set readSet;
+            FD_ZERO(&readSet);
+            FD_SET(socketHandle, &readSet);
+
+            timeval timeout{};
+            timeout.tv_sec = 1;
+            timeout.tv_usec = 0;
+
+            const int selectResult = select(static_cast<int>(socketHandle) + 1, &readSet, nullptr, nullptr, &timeout);
+            if (selectResult == 0) {
+                continue;
+            }
+            if (selectResult < 0) {
+                if (running) {
+                    log("MAIN", "Interface endpoint " + entry.name + " select() failed: " + getSocketErrorText());
+                }
+                break;
+            }
+
+            sockaddr_in peerAddr{};
+#ifdef _WIN32
+            int peerAddrSize = sizeof(peerAddr);
+#else
+            socklen_t peerAddrSize = sizeof(peerAddr);
+#endif
+            NativeSocket clientSocket = accept(socketHandle,
+                                               reinterpret_cast<sockaddr*>(&peerAddr),
+                                               &peerAddrSize);
+            if (clientSocket == INVALID_NATIVE_SOCKET) {
+                if (running) {
+                    log("MAIN", "Interface endpoint " + entry.name + " accept() failed: " + getSocketErrorText());
+                }
+                continue;
+            }
+
+            char peerBuffer[INET_ADDRSTRLEN]{};
+            std::string peerIp = "unknown";
+            if (inet_ntop(AF_INET, &peerAddr.sin_addr, peerBuffer, sizeof(peerBuffer)) != nullptr) {
+                peerIp = peerBuffer;
+            }
+            log("MAIN", "Interface endpoint " + entry.name + " accepted connection from " + peerIp);
+
+#ifdef _WIN32
+            DWORD timeoutMs = 1500;
+            setsockopt(clientSocket, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeoutMs), sizeof(timeoutMs));
+            const int received = recv(clientSocket, buffer.data(), static_cast<int>(buffer.size()), 0);
+#else
+            timeval receiveTimeout{};
+            receiveTimeout.tv_sec = 1;
+            receiveTimeout.tv_usec = 500000;
+            setsockopt(clientSocket, SOL_SOCKET, SO_RCVTIMEO, &receiveTimeout, sizeof(receiveTimeout));
+            const int received = static_cast<int>(recv(clientSocket, buffer.data(), buffer.size(), 0));
+#endif
+
+            if (received > 0) {
+                runtimeState.receivedPackets += 1;
+                runtimeState.receivedBytes += static_cast<uint64_t>(received);
+                runtimeState.lastPeer = peerIp;
+                runtimeState.lastActivityAt = std::time(nullptr);
+                runtimeState.reason = "listener accepting connections and receiving payloads";
+                setInterfaceEndpointState(endpointKey, runtimeState);
+
+                std::ostringstream message;
+                message << "Interface endpoint " << entry.name
+                        << " received " << received << " bytes from " << peerIp;
+                log("MAIN", message.str());
+
+                if (entry.name == "S6a") {
+                    const std::vector<uint8_t> packet(buffer.begin(), buffer.begin() + received);
+                    vepc::DiameterHeader header;
+                    std::string parseError;
+                    if (!vepc::parseDiameterHeader(packet, header, parseError)) {
+                        runtimeState.lastMessage = "Rejected Diameter";
+                        runtimeState.lastDetail = parseError;
+                        setInterfaceEndpointState(endpointKey, runtimeState);
+                        log("S6A", "Rejected Diameter packet from " + peerIp + ": " + parseError);
+                    } else {
+                        runtimeState.lastMessage = vepc::formatDiameterCommand(header.commandCode, header.request);
+                        runtimeState.lastDetail = "app_id=" + std::to_string(header.applicationId)
+                            + ", message_length=" + std::to_string(header.messageLength);
+
+                        std::string diameterDetailForLog;
+                        if (header.commandCode == 257 && header.request) {
+                            vepc::DiameterCapabilitiesExchangeRequest cer;
+                            if (!vepc::parseCapabilitiesExchangeRequest(packet, cer, parseError)) {
+                                runtimeState.lastMessage = "Rejected Diameter";
+                                runtimeState.lastDetail = parseError;
+                                setInterfaceEndpointState(endpointKey, runtimeState);
+                                log("S6A", "Rejected Diameter CER from " + peerIp + ": " + parseError);
+                                closeNativeSocket(clientSocket);
+                                continue;
+                            }
+
+                            std::ostringstream cerDetail;
+                            if (cer.hasOriginHost) {
+                                cerDetail << "origin_host=" << cer.originHost;
+                            }
+                            if (cer.hasOriginRealm) {
+                                if (cerDetail.tellp() > 0) {
+                                    cerDetail << ", ";
+                                }
+                                cerDetail << "origin_realm=" << cer.originRealm;
+                            }
+                            if (cerDetail.tellp() <= 0) {
+                                cerDetail << "no Origin-Host/Origin-Realm AVPs";
+                            }
+
+                            runtimeState.lastDetail = cerDetail.str();
+                            diameterDetailForLog = runtimeState.lastDetail;
+                        }
+
+                        setInterfaceEndpointState(endpointKey, runtimeState);
+
+                        std::ostringstream diameterLog;
+                        diameterLog << "Parsed Diameter header from " << peerIp
+                                    << ": command=" << vepc::formatDiameterCommand(header.commandCode, header.request)
+                                    << ", app_id=" << header.applicationId
+                                    << ", hop_by_hop=0x" << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << header.hopByHopId
+                                    << ", end_to_end=0x" << std::setw(8) << header.endToEndId
+                                    << std::dec << std::setfill(' ')
+                                    << ", message_length=" << header.messageLength;
+                        if (!diameterDetailForLog.empty()) {
+                            diameterLog << ", " << diameterDetailForLog;
+                        }
+                        log("S6A", diameterLog.str());
+
+                        if (header.commandCode == 257 && header.request) {
+                            const std::string originHost = config.count("s6a-hss-host") != 0 && !config.at("s6a-hss-host").empty()
+                                ? config.at("s6a-hss-host")
+                                : "hss.vepc.local";
+                            const std::string originRealm = config.count("s6a-hss-realm") != 0 && !config.at("s6a-hss-realm").empty()
+                                ? config.at("s6a-hss-realm")
+                                : "epc.mnc001.mcc001.3gppnetwork.org";
+                            const std::vector<uint8_t> response = vepc::buildCapabilitiesExchangeAnswer(header, originHost, originRealm);
+#ifdef _WIN32
+                            const int sent = send(clientSocket,
+                                                  reinterpret_cast<const char*>(response.data()),
+                                                  static_cast<int>(response.size()),
+                                                  0);
+#else
+                            const int sent = static_cast<int>(send(clientSocket,
+                                                                   response.data(),
+                                                                   response.size(),
+                                                                   0));
+#endif
+                            if (sent == static_cast<int>(response.size())) {
+                                std::ostringstream responseLog;
+                                responseLog << "Sent Diameter response to " << peerIp
+                                            << ": command=" << vepc::formatDiameterCommand(257, false)
+                                            << ", bytes=" << response.size();
+                                log("S6A", responseLog.str());
+                            } else {
+                                log("S6A", "Failed to send Diameter response to " + peerIp + ": " + getSocketErrorText());
+                            }
+                        }
+                    }
+                }
+            } else if (received < 0 && running) {
+                log("MAIN", "Interface endpoint " + entry.name + " recv() failed: " + getSocketErrorText());
+            }
+
+            closeNativeSocket(clientSocket);
         }
     }
 
@@ -1968,6 +2133,8 @@ std::string VNodeController::formatInterfaceStatus(const std::string& name) cons
         << "  Rx Packets    : " << endpointRuntime.receivedPackets << "\n"
         << "  Rx Bytes      : " << endpointRuntime.receivedBytes << "\n"
         << "  Last Peer     : " << (endpointRuntime.lastPeer.empty() ? "n/a" : endpointRuntime.lastPeer) << "\n"
+        << "  Last Message  : " << (endpointRuntime.lastMessage.empty() ? "n/a" : endpointRuntime.lastMessage) << "\n"
+        << "  Last Detail   : " << (endpointRuntime.lastDetail.empty() ? "n/a" : endpointRuntime.lastDetail) << "\n"
         << "  Last Activity : " << (endpointRuntime.lastActivityAt == 0 ? "n/a" : formatTimestamp(endpointRuntime.lastActivityAt)) << "\n";
     return oss.str();
 }
@@ -2200,6 +2367,8 @@ std::string VNodeController::formatStateSnapshotLocked() const {
         oss << "  Rx Packets: " << endpointRuntime.receivedPackets << "\n";
         oss << "  Rx Bytes: " << endpointRuntime.receivedBytes << "\n";
         oss << "  Last Peer: " << (endpointRuntime.lastPeer.empty() ? "n/a" : endpointRuntime.lastPeer) << "\n";
+        oss << "  Last Message: " << (endpointRuntime.lastMessage.empty() ? "n/a" : endpointRuntime.lastMessage) << "\n";
+        oss << "  Last Detail: " << (endpointRuntime.lastDetail.empty() ? "n/a" : endpointRuntime.lastDetail) << "\n";
         oss << "  Last Activity: " << (endpointRuntime.lastActivityAt == 0 ? "n/a" : formatTimestamp(endpointRuntime.lastActivityAt)) << "\n";
     }
     if (!hasEndpointTelemetry) {

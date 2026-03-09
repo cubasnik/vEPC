@@ -612,6 +612,19 @@
    - Ожидаемый результат:
       - `S11` получает ещё один наблюдаемый control path поверх create/update/delete/activate/notify/reject/failure/present, в котором runtime state отражает фазу `Identification`, а не только общий факт обновления контекста
 
+13. Шаг 5.13: сделано
+   - Файлы: `main.cpp`, `src/diameter_parser.h`, `src/diameter_parser.cpp`, `test_diameter_parser.cpp`, `test_s6a_diameter_client.cpp`, `cmake/TestS6aTelemetry.cmake`, `CMakeLists.txt`
+   - Изменения:
+      - добавить минимальный `S6a` roundtrip path для `DIAMETER`: generic connection-oriented endpoint принимает TCP connection, читает `CER`, обновляет interface telemetry counters и возвращает demo `CEA` с минимальным AVP-набором
+      - вынести минимальный Diameter header parser/builder с распознаванием `Capabilities-Exchange-Request/Answer`, разбором `Origin-Host` и `Origin-Realm` из входящего `CER` и формированием `CEA` с `Result-Code`, `Origin-Host` и `Origin-Realm` из текущего `S6a` конфига
+      - добавить parser-level coverage, demo TCP client и smoke `s6a-telemetry-smoke`, который доказывает `S6a` bind, приём `CER`, возврат содержательного `CEA`, обновление `iface_status/state` с parsed AVP detail и наличие диагностических логов
+   - Проверка:
+      - `cmake --build build-win --config Release`
+      - `ctest --test-dir build-win -C Release -R "diameter-parser-smoke|s6a-telemetry-smoke|gtp-u-telemetry-smoke|s11-(telemetry|identification|note-ms-present|failure-report|pdu-notification|pdu-notification-reject|activate-pdp|update-pdp|delete-pdp|echo)-smoke" --output-on-failure`
+      - `ctest --test-dir build-win -C Release --output-on-failure`
+   - Ожидаемый результат:
+      - `S6a` перестаёт быть только placeholder listener и получает первый наблюдаемый runtime roundtrip для Diameter `CER/CEA` с минимально полезным AVP-содержимым и извлечением `Origin-Host`/`Origin-Realm` в runtime telemetry, не пытаясь пока эмулировать полный HSS workflow
+
 ## Ближайший план (рекомендуемый порядок)
 
 1. Закрыть `Этап 0.6`: help по режимам, структурированные обёртки для всех runtime-команд, стабильные smoke tests.

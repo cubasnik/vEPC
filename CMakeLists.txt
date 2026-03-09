@@ -7,6 +7,7 @@ enable_testing()
 # Главная программа vEPC
 add_executable(vepc
     main.cpp
+    src/diameter_parser.cpp
     src/gtp_parser.cpp
     src/s1ap_parser.cpp
 )
@@ -36,7 +37,18 @@ add_executable(test-s11-gtpc-client
     src/gtp_parser.cpp
 )
 
+add_executable(test-diameter-parser
+    test_diameter_parser.cpp
+    src/diameter_parser.cpp
+)
+
+add_executable(test-s6a-diameter-client
+    test_s6a_diameter_client.cpp
+    src/diameter_parser.cpp
+)
+
 add_test(NAME gtp-parser-smoke COMMAND test-gtp-parser)
+add_test(NAME diameter-parser-smoke COMMAND test-diameter-parser)
 add_test(NAME s1ap-parser-smoke COMMAND test-s1ap-parser)
 add_test(
     NAME runtime-state-recovery-smoke
@@ -60,6 +72,15 @@ add_test(
         -DRUNTIME_CLI_EXE=$<TARGET_FILE:test-runtime-cli>
         -DSOURCE_DIR=${CMAKE_SOURCE_DIR}
         -P ${CMAKE_SOURCE_DIR}/cmake/TestGtpuTelemetry.cmake
+)
+add_test(
+    NAME s6a-telemetry-smoke
+    COMMAND ${CMAKE_COMMAND}
+        -DVEPC_EXE=$<TARGET_FILE:vepc>
+        -DRUNTIME_CLI_EXE=$<TARGET_FILE:test-runtime-cli>
+        -DS6A_DIAMETER_CLIENT_EXE=$<TARGET_FILE:test-s6a-diameter-client>
+        -DSOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -P ${CMAKE_SOURCE_DIR}/cmake/TestS6aTelemetry.cmake
 )
 add_test(
     NAME s11-telemetry-smoke
@@ -162,7 +183,9 @@ target_link_libraries(vepc-cli Threads::Threads)
 if (WIN32)
     target_link_libraries(vepc ws2_32 iphlpapi)
     target_link_libraries(vepc-cli ws2_32)
+    target_link_libraries(test-diameter-parser ws2_32)
     target_link_libraries(test-runtime-cli ws2_32)
+    target_link_libraries(test-s6a-diameter-client ws2_32)
     target_link_libraries(test-s11-gtpc-client ws2_32)
 
     set(ROOT_SYNC_SCRIPT ${CMAKE_SOURCE_DIR}/cmake/SyncBinaryToRoot.cmake)
