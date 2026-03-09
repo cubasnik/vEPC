@@ -7,7 +7,7 @@ if(NOT DEFINED LABEL)
 endif()
 
 if(NOT EXISTS "${SOURCE}")
-    message(WARNING "Skipping root sync for ${LABEL}: source file not found: ${SOURCE}")
+    message(VERBOSE "Skipping root sync for ${LABEL}: source file not found: ${SOURCE}")
     return()
 endif()
 
@@ -20,5 +20,5 @@ execute_process(
 if(NOT sync_result EQUAL 0)
     string(REPLACE "\r" " " sync_error "${sync_error}")
     string(REPLACE "\n" " " sync_error "${sync_error}")
-    message(WARNING "Skipping root sync for ${LABEL}; destination may be locked: ${sync_error}")
+    message(VERBOSE "Skipping root sync for ${LABEL}; destination may be locked: ${sync_error}")
 endif()
