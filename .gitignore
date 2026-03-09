@@ -1,0 +1,40 @@
+# Local editor settings
+.vscode/
+
+# CMake and build outputs
+/build/
+/build-win/
+/Debug/
+/Release/
+/x64/
+
+# Generated binaries and debug artifacts
+*.exe
+*.dll
+*.lib
+*.exp
+*.pdb
+*.ilk
+*.obj
+*.o
+*.a
+
+# MSVC and CMake generated project metadata
+*.vcxproj
+*.vcxproj.filters
+*.sln
+*.slnx
+*.recipe
+*.tlog
+*.lastbuildstate
+*.idb
+*.ipdb
+*.iobj
+*.dir/
+CMakeCache.txt
+CMakeFiles/
+CTestTestfile.cmake
+Testing/
+
+# Logs and temporary runtime files
+*.log

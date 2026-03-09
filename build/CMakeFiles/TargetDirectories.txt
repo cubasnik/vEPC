@@ -1,4 +1,0 @@
-/mnt/c/Users/Alexey/Desktop/min/vne/vepc/build/CMakeFiles/vepc.dir
-/mnt/c/Users/Alexey/Desktop/min/vne/vepc/build/CMakeFiles/vepc-cli.dir
-/mnt/c/Users/Alexey/Desktop/min/vne/vepc/build/CMakeFiles/edit_cache.dir
-/mnt/c/Users/Alexey/Desktop/min/vne/vepc/build/CMakeFiles/rebuild_cache.dir

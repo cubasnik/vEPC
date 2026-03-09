@@ -1,4 +1,0 @@
-C:/Users/Alexey/Desktop/min/vNE/vEPC/build-win/CMakeFiles/vepc.dir
-C:/Users/Alexey/Desktop/min/vNE/vEPC/build-win/CMakeFiles/vepc-cli.dir
-C:/Users/Alexey/Desktop/min/vNE/vEPC/build-win/CMakeFiles/ALL_BUILD.dir
-C:/Users/Alexey/Desktop/min/vNE/vEPC/build-win/CMakeFiles/ZERO_CHECK.dir
