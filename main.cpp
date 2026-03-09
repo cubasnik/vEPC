@@ -42,6 +42,7 @@
 #define LOG_FILE    "build/logs/vepc.log"
 #define RUNTIME_STATE_FILE "build/state/runtime_state.json"
 #define RUNTIME_STATE_SCHEMA_VERSION 2
+#define RUNTIME_STATE_CORRUPT_RETENTION 5
 #define CONFIG_FILE "config/vepc.config"
 #define MME_CONFIG_FILE "config/vmme.conf"
 #define SGSN_CONFIG_FILE "config/vsgsn.conf"
@@ -138,6 +139,10 @@ struct InterfaceConfigEntry {
 struct InterfaceEndpointRuntime {
     bool        handlerImplemented = false;
     bool        listenerActive = false;
+    uint64_t    receivedPackets = 0;
+    uint64_t    receivedBytes = 0;
+    std::string lastPeer;
+    std::time_t lastActivityAt = 0;
     std::string reason;
 };
 
@@ -419,6 +424,26 @@ static bool isGenericEndpointProtocol(const InterfaceConfigEntry& entry, const s
     return entry.proto == "UDP"
         && gtpUserPortIt != config.end()
         && entry.port == gtpUserPortIt->second;
+}
+
+static std::string resolveInterfaceBindIp(const InterfaceConfigEntry& entry, const std::map<std::string, std::string>& config) {
+    const auto gtpUserPortIt = config.find("gtp-u-port");
+    const bool isGtpUser = gtpUserPortIt != config.end()
+        && entry.proto == "UDP"
+        && entry.port == gtpUserPortIt->second;
+    if (isGtpUser) {
+        const auto bindIpIt = config.find("gn-gtp-u-bind-ip");
+        if (bindIpIt != config.end() && !bindIpIt->second.empty()) {
+            return bindIpIt->second;
+        }
+
+        const auto sgsnIpIt = config.find("sgsn-ip");
+        if (sgsnIpIt != config.end() && !sgsnIpIt->second.empty()) {
+            return sgsnIpIt->second;
+        }
+    }
+
+    return entry.ip;
 }
 
 static std::string getSocketErrorText() {
@@ -918,6 +943,62 @@ static std::string quarantineRuntimeStateFile(const std::string& inputPath) {
     }
 
     return destinationPath.string();
+}
+
+static std::size_t pruneCorruptRuntimeStateFiles(const std::filesystem::path& stateDirectory,
+                                                 std::size_t maxFiles,
+                                                 const std::filesystem::path& preservePath = {}) {
+    if (maxFiles == 0 || stateDirectory.empty()) {
+        return 0;
+    }
+
+    std::error_code error;
+    if (!std::filesystem::exists(stateDirectory, error) || error) {
+        return 0;
+    }
+
+    std::vector<std::filesystem::path> files;
+    for (const auto& entry : std::filesystem::directory_iterator(stateDirectory, error)) {
+        if (error) {
+            return 0;
+        }
+
+        if (!entry.is_regular_file()) {
+            continue;
+        }
+
+        const auto fileName = entry.path().filename().string();
+        if (startsWith(fileName, "runtime_state.corrupt-") && entry.path().extension() == ".json") {
+            files.push_back(entry.path());
+        }
+    }
+
+    if (files.size() <= maxFiles) {
+        return 0;
+    }
+
+    std::sort(files.begin(), files.end(), [](const std::filesystem::path& left, const std::filesystem::path& right) {
+        return left.filename().string() < right.filename().string();
+    });
+
+    const std::string preserved = preservePath.empty() ? "" : preservePath.lexically_normal().string();
+    std::size_t removedCount = 0;
+    for (const auto& file : files) {
+        if (files.size() - removedCount <= maxFiles) {
+            break;
+        }
+        if (!preserved.empty() && file.lexically_normal().string() == preserved) {
+            continue;
+        }
+
+        std::filesystem::remove(file, error);
+        if (!error) {
+            ++removedCount;
+        }
+        error.clear();
+    }
+
+    return removedCount;
 }
 
 static void appendJsonStringField(std::ostringstream& oss,
@@ -1445,10 +1526,11 @@ InterfaceEndpointRuntime VNodeController::getInterfaceEndpointState(const Interf
 
 void VNodeController::interfaceEndpointThread(InterfaceConfigEntry entry) {
     const std::string endpointKey = makeEndpointKey(entry);
+    const std::string bindIp = resolveInterfaceBindIp(entry, config);
     InterfaceEndpointRuntime runtimeState;
     runtimeState.handlerImplemented = true;
 
-    if (!isLocalInterfaceAddress(entry.ip, config)) {
+    if (!isLocalInterfaceAddress(bindIp, config)) {
         runtimeState.reason = "configured on non-local address";
         setInterfaceEndpointState(endpointKey, runtimeState);
         return;
@@ -1497,8 +1579,8 @@ void VNodeController::interfaceEndpointThread(InterfaceConfigEntry entry) {
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(static_cast<uint16_t>(port));
-    if (inet_pton(AF_INET, entry.ip.c_str(), &addr.sin_addr) != 1) {
-        runtimeState.reason = "inet_pton failed for address " + entry.ip;
+    if (inet_pton(AF_INET, bindIp.c_str(), &addr.sin_addr) != 1) {
+        runtimeState.reason = "inet_pton failed for address " + bindIp;
         setInterfaceEndpointState(endpointKey, runtimeState);
         closeNativeSocket(socketHandle);
 #ifdef _WIN32
@@ -1532,10 +1614,83 @@ void VNodeController::interfaceEndpointThread(InterfaceConfigEntry entry) {
         ? "listener bound and accepting connections"
         : "socket bound and ready";
     setInterfaceEndpointState(endpointKey, runtimeState);
-    log("MAIN", "Interface endpoint " + entry.name + " ready on " + entry.address + " (" + entry.proto + ")");
+    log("MAIN", "Interface endpoint " + entry.name + " ready on " + bindIp + ":" + entry.port + " (" + entry.proto + ")");
 
-    while (running) {
-        std::this_thread::sleep_for(std::chrono::seconds(1));
+    if (!isConnectionOrientedProtocol(entry)) {
+        std::vector<char> buffer(2048);
+        while (running) {
+            fd_set readSet;
+            FD_ZERO(&readSet);
+            FD_SET(socketHandle, &readSet);
+
+            timeval timeout{};
+            timeout.tv_sec = 1;
+            timeout.tv_usec = 0;
+
+            const int selectResult = select(static_cast<int>(socketHandle) + 1, &readSet, nullptr, nullptr, &timeout);
+            if (selectResult == 0) {
+                continue;
+            }
+            if (selectResult < 0) {
+                if (running) {
+                    log("MAIN", "Interface endpoint " + entry.name + " select() failed: " + getSocketErrorText());
+                }
+                break;
+            }
+
+            sockaddr_in peerAddr{};
+#ifdef _WIN32
+            int peerAddrSize = sizeof(peerAddr);
+            const int received = recvfrom(socketHandle,
+                                          buffer.data(),
+                                          static_cast<int>(buffer.size()),
+                                          0,
+                                          reinterpret_cast<sockaddr*>(&peerAddr),
+                                          &peerAddrSize);
+            if (received == SOCKET_ERROR) {
+                if (running) {
+                    log("MAIN", "Interface endpoint " + entry.name + " recvfrom() failed: socket error " + std::to_string(WSAGetLastError()));
+                }
+                continue;
+            }
+#else
+            socklen_t peerAddrSize = sizeof(peerAddr);
+            const int received = static_cast<int>(recvfrom(socketHandle,
+                                                           buffer.data(),
+                                                           buffer.size(),
+                                                           0,
+                                                           reinterpret_cast<sockaddr*>(&peerAddr),
+                                                           &peerAddrSize));
+            if (received < 0) {
+                if (running) {
+                    log("MAIN", "Interface endpoint " + entry.name + " recvfrom() failed: " + getSocketErrorText());
+                }
+                continue;
+            }
+#endif
+
+            char peerBuffer[INET_ADDRSTRLEN]{};
+            std::string peerIp = "unknown";
+            if (inet_ntop(AF_INET, &peerAddr.sin_addr, peerBuffer, sizeof(peerBuffer)) != nullptr) {
+                peerIp = peerBuffer;
+            }
+
+            runtimeState.receivedPackets += 1;
+            runtimeState.receivedBytes += static_cast<uint64_t>(received);
+            runtimeState.lastPeer = peerIp;
+            runtimeState.lastActivityAt = std::time(nullptr);
+            runtimeState.reason = "socket bound and receiving datagrams";
+            setInterfaceEndpointState(endpointKey, runtimeState);
+
+            std::ostringstream message;
+            message << "Interface endpoint " << entry.name
+                    << " received " << received << " bytes from " << peerIp;
+            log("MAIN", message.str());
+        }
+    } else {
+        while (running) {
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
     }
 
     runtimeState.listenerActive = false;
@@ -1587,7 +1742,7 @@ InterfaceDiagnostics VNodeController::buildInterfaceDiagnostics(const InterfaceC
         sgsn = sgsnStatus;
     }
 
-    diagnostics.localBind = isLocalInterfaceAddress(entry.ip, config);
+    diagnostics.localBind = isLocalInterfaceAddress(resolveInterfaceBindIp(entry, config), config);
 
     const auto s1apPortIt = config.find("s1ap-port");
     const auto gtpControlPortIt = config.find("gtp-c-port");
@@ -1740,12 +1895,15 @@ std::string VNodeController::formatInterfaceStatus(const std::string& name) cons
         return "Interface '" + name + "' not found in interfaces.conf\n";
     }
 
+    const InterfaceEndpointRuntime endpointRuntime = getInterfaceEndpointState(*entryIt);
+    const std::string bindIp = resolveInterfaceBindIp(*entryIt, config);
     const InterfaceDiagnostics diagnostics = buildInterfaceDiagnostics(*entryIt);
 
     std::ostringstream oss;
     oss << "Interface " << entryIt->name << " status:\n"
         << "  Protocol      : " << entryIt->proto << "\n"
         << "  Address       : " << entryIt->address << "\n"
+        << "  Effective Bind: " << bindIp << (entryIt->port.empty() ? "" : ":" + entryIt->port) << "\n"
         << "  Peer          : " << entryIt->peer << "\n"
         << "  Admin State   : " << (diagnostics.adminUp ? "UP" : "DOWN") << "\n"
         << "  Oper State    : " << diagnostics.operState << "\n"
@@ -1755,7 +1913,11 @@ std::string VNodeController::formatInterfaceStatus(const std::string& name) cons
         << "  Bind Reason   : " << diagnostics.bindReason << "\n"
         << "  Listen State  : " << diagnostics.listenState << "\n"
         << "  Listen Reason : " << diagnostics.listenReason << "\n"
-        << "  Reason        : " << diagnostics.reason << "\n";
+        << "  Reason        : " << diagnostics.reason << "\n"
+        << "  Rx Packets    : " << endpointRuntime.receivedPackets << "\n"
+        << "  Rx Bytes      : " << endpointRuntime.receivedBytes << "\n"
+        << "  Last Peer     : " << (endpointRuntime.lastPeer.empty() ? "n/a" : endpointRuntime.lastPeer) << "\n"
+        << "  Last Activity : " << (endpointRuntime.lastActivityAt == 0 ? "n/a" : formatTimestamp(endpointRuntime.lastActivityAt)) << "\n";
     return oss.str();
 }
 
@@ -1954,6 +2116,45 @@ std::string VNodeController::formatStateSnapshotLocked() const {
             oss << "  Updated At: " << formatTimestamp(context.updated_at) << "\n";
         }
     }
+
+    const auto interfaceEntries = loadInterfaceConfigEntries();
+    std::set<std::string> renderedEndpoints;
+    bool hasEndpointTelemetry = false;
+    for (const auto& entry : interfaceEntries) {
+        if (!isGenericEndpointProtocol(entry, config)) {
+            continue;
+        }
+
+        const std::string endpointKey = makeEndpointKey(entry);
+        if (!renderedEndpoints.insert(endpointKey).second) {
+            continue;
+        }
+
+        const InterfaceEndpointRuntime endpointRuntime = getInterfaceEndpointState(entry);
+        if (!endpointRuntime.handlerImplemented) {
+            continue;
+        }
+
+        if (!hasEndpointTelemetry) {
+            oss << "Endpoint telemetry:\n";
+            hasEndpointTelemetry = true;
+        }
+
+        oss << "- Name: " << entry.name << "\n";
+        oss << "  Protocol: " << entry.proto << "\n";
+        oss << "  Address: " << entry.address << "\n";
+        oss << "  Effective Bind: " << resolveInterfaceBindIp(entry, config)
+            << (entry.port.empty() ? "" : ":" + entry.port) << "\n";
+        oss << "  Active: " << (endpointRuntime.listenerActive ? "yes" : "no") << "\n";
+        oss << "  Rx Packets: " << endpointRuntime.receivedPackets << "\n";
+        oss << "  Rx Bytes: " << endpointRuntime.receivedBytes << "\n";
+        oss << "  Last Peer: " << (endpointRuntime.lastPeer.empty() ? "n/a" : endpointRuntime.lastPeer) << "\n";
+        oss << "  Last Activity: " << (endpointRuntime.lastActivityAt == 0 ? "n/a" : formatTimestamp(endpointRuntime.lastActivityAt)) << "\n";
+    }
+    if (!hasEndpointTelemetry) {
+        oss << "Endpoint telemetry: none\n";
+    }
+
     oss << "UE contexts:  " << ueContexts.size() << "\n";
     if (ueContexts.empty()) {
         oss << "UE context details: none\n";
@@ -3617,6 +3818,12 @@ void VNodeController::start() {
             const std::string quarantinePath = quarantineRuntimeStateFile(inputPath);
             if (!quarantinePath.empty()) {
                 log("MAIN", "Corrupt runtime state moved to " + quarantinePath);
+                const std::size_t prunedCount = pruneCorruptRuntimeStateFiles(std::filesystem::path(inputPath).parent_path(),
+                                                                              RUNTIME_STATE_CORRUPT_RETENTION,
+                                                                              quarantinePath);
+                if (prunedCount > 0) {
+                    log("MAIN", "Pruned " + std::to_string(prunedCount) + " old corrupt runtime state snapshot(s)");
+                }
             }
         } catch (const std::exception& quarantineEx) {
             log("MAIN", std::string("Failed to quarantine runtime state: ") + quarantineEx.what());

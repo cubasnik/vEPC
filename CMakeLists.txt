@@ -27,6 +27,10 @@ add_executable(test-s1ap-parser
     src/s1ap_parser.cpp
 )
 
+add_executable(test-runtime-cli
+    test_runtime_cli.cpp
+)
+
 add_test(NAME gtp-parser-smoke COMMAND test-gtp-parser)
 add_test(NAME s1ap-parser-smoke COMMAND test-s1ap-parser)
 add_test(
@@ -35,6 +39,22 @@ add_test(
         -DVEPC_EXE=$<TARGET_FILE:vepc>
         -DSOURCE_DIR=${CMAKE_SOURCE_DIR}
         -P ${CMAKE_SOURCE_DIR}/cmake/TestRuntimeStateRecovery.cmake
+)
+add_test(
+    NAME runtime-state-restore-smoke
+    COMMAND ${CMAKE_COMMAND}
+        -DVEPC_EXE=$<TARGET_FILE:vepc>
+        -DRUNTIME_CLI_EXE=$<TARGET_FILE:test-runtime-cli>
+        -DSOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -P ${CMAKE_SOURCE_DIR}/cmake/TestRuntimeStateRestore.cmake
+)
+add_test(
+    NAME gtp-u-telemetry-smoke
+    COMMAND ${CMAKE_COMMAND}
+        -DVEPC_EXE=$<TARGET_FILE:vepc>
+        -DRUNTIME_CLI_EXE=$<TARGET_FILE:test-runtime-cli>
+        -DSOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -P ${CMAKE_SOURCE_DIR}/cmake/TestGtpuTelemetry.cmake
 )
 
 # Для Linux нужно добавить pthread
@@ -47,6 +67,7 @@ target_link_libraries(vepc-cli Threads::Threads)
 if (WIN32)
     target_link_libraries(vepc ws2_32 iphlpapi)
     target_link_libraries(vepc-cli ws2_32)
+    target_link_libraries(test-runtime-cli ws2_32)
 
     set(ROOT_SYNC_SCRIPT ${CMAKE_SOURCE_DIR}/cmake/SyncBinaryToRoot.cmake)
 

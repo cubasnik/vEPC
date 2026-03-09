@@ -67,9 +67,9 @@
 | 0.6 | Сделано | P0 | Структурированный CLI и устойчивое операционное управление | Нет |
 | 1 | В работе | P1 | Реальный путь разбора GTP-C и PDP context | Нужны формализованные структуры и повторяемый локальный тест |
 | 2 | В работе | P1 | Минимальный поток S1AP/NAS и UE context | Нужны стабильный SCTP path и минимальная модель UE context |
-| 3 | Не начато | P2 | Сохранение PDP/UE context | Нельзя качественно делать до стабилизации структур этапов 1 и 2 |
+| 3 | Сделано | P2 | Сохранение PDP/UE context | Нет |
 | 4 | Не начато | P3 | GUI/расширенный UI | Не должен забирать фокус до завершения протокольного пути |
-| 5 | Не начато | P2 | GTP-U, S11, S6a, handover | Зависит от стабильного базового runtime и слоя состояния |
+| 5 | В работе | P2 | GTP-U, S11, S6a, handover | Нужен минимальный наблюдаемый runtime path для каждого нового интерфейса |
 
 ### Правила приоритизации
 
@@ -397,6 +397,28 @@
    - Ожидаемый результат:
       - старт не застревает на поврежденном state-файле, переносит его в quarantine и продолжает работу с пустым runtime-state
 
+5. Шаг 3.5: сделано
+   - Файлы: `main.cpp`, `cmake/TestRuntimeStateRecovery.cmake`
+   - Изменения:
+      - автоматически удерживать только последние quarantine snapshots `runtime_state.corrupt-*.json`, чтобы recovery-path не засорял `build/state`
+      - расширить `runtime-state-recovery-smoke`, чтобы он проверял не только перенос битого state-файла, но и pruning старых quarantine copies
+   - Проверка:
+      - `cmake --build build-win --config Release --target vepc`
+      - `ctest --test-dir build-win -C Release -R runtime-state-recovery-smoke --output-on-failure`
+   - Ожидаемый результат:
+      - quarantine recovery остаётся диагностируемым, но не накапливает бесконечный хвост устаревших corrupt snapshots
+
+6. Шаг 3.6: сделано
+   - Файлы: `CMakeLists.txt`, `cmake/TestRuntimeStateRestore.cmake`, `test_runtime_cli.cpp`
+   - Изменения:
+      - добавить отдельный CTest smoke `runtime-state-restore-smoke`, который поднимает `vepc` на валидном snapshot и проверяет восстановленный `state` через сырой TCP CLI helper
+      - зафиксировать позитивный restore path для UE/PDP contexts, чтобы persistence проверялась не только на corrupt recovery, но и на успешную загрузку
+   - Проверка:
+      - `cmake --build build-win --config Release --target test-runtime-cli vepc vepc-cli`
+      - `ctest --test-dir build-win -C Release -R runtime-state-restore-smoke --output-on-failure`
+   - Ожидаемый результат:
+      - restart/start path воспроизводимо восстанавливает сохранённые UE/PDP contexts и делает это наблюдаемым через `state`
+
 - Сериализация PDP/UE контекстов в JSON или бинарный файл (при `stop`/`restart`)
 - Загрузка при запуске (опционально)
 - Runtime-состояние интерфейсов уже сохраняется отдельно; следующий шаг здесь именно для PDP/UE-контекстов
@@ -435,6 +457,19 @@
 Зависимости:
 
 - Имеет смысл только после стабилизации базовых PDP/UE контекстов и управляемого state layer
+
+1. Шаг 5.1: сделано
+   - Файлы: `main.cpp`, `CMakeLists.txt`, `cmake/TestGtpuTelemetry.cmake`, `test_runtime_cli.cpp`
+   - Изменения:
+      - поднять минимальный наблюдаемый `GTP-U` runtime path поверх существующего generic endpoint thread без полноценной user-plane логики
+      - использовать `gn-gtp-u-bind-ip` как effective bind для `Gn`, чтобы `GTP-U` endpoint реально поднимался на локальном адресе из `vsgsn.conf`
+      - добавить endpoint telemetry в `state` и `iface_status`, включая `Rx Packets`, `Rx Bytes`, `Last Peer` и `Last Activity`
+      - покрыть это CTest smoke `gtp-u-telemetry-smoke`, который шлёт UDP datagram на `127.0.0.1:2152` и проверяет counters/logs
+   - Проверка:
+      - `cmake --build build-win --config Release --target test-runtime-cli vepc vepc-cli`
+      - `ctest --test-dir build-win -C Release -R gtp-u-telemetry-smoke --output-on-failure`
+   - Ожидаемый результат:
+      - `Gn` перестаёт быть только конфиг-записью и получает минимально наблюдаемый runtime path, пригодный для дальнейшего наращивания `GTP-U`
 
 ## Ближайший план (рекомендуемый порядок)
 
