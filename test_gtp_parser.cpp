@@ -93,5 +93,77 @@ int main() {
     ok &= expect(vepc::buildCreatePdpContextResponse(header, 0x10004321u) == expectedCreatePdpResponse,
                  "create pdp response bytes are stable");
 
+    const std::vector<uint8_t> updatePdpRequest = {
+        0x32, 0x12, 0x00, 0x21,
+        0x10, 0x00, 0x43, 0x21,
+        0x43, 0x23, 0x00, 0x00,
+        0x02, 0x21, 0x43, 0x65, 0x87, 0x09, 0x21, 0x43, 0xF5,
+        0x80, 0x00, 0x02, 0xF1, 0x57,
+        0x83, 0x00, 0x05, 0x04, 'c', 'o', 'r', 'p',
+        0x85, 0x00, 0x04, 0x0A, 0x17, 0x2A, 0x63,
+    };
+
+    ok &= expect(vepc::parseGtpV1Header(updatePdpRequest, header, error), "update pdp request header parses");
+    ok &= expect(vepc::parseUpdatePdpContextRequest(updatePdpRequest, header, request, error), "update pdp request body parses");
+    ok &= expect(request.hasImsi && request.imsi == "123456789012345", "update pdp parser extracts IMSI");
+    ok &= expect(request.hasApn && request.apn == "corp", "update pdp parser extracts APN");
+    ok &= expect(request.hasPdpType && request.pdpType == 0x57, "update pdp parser extracts PDP type");
+    ok &= expect(request.hasGgsnIp && request.ggsnIp == "10.23.42.99", "update pdp parser extracts GGSN IP");
+
+    const std::vector<uint8_t> expectedUpdatePdpResponse = {
+        0x32, 0x13, 0x00, 0x06,
+        0x10, 0x00, 0x43, 0x21,
+        0x43, 0x23, 0x00, 0x00,
+        0x01, 0x80,
+    };
+    ok &= expect(vepc::buildUpdatePdpContextResponse(header, 0x10004321u) == expectedUpdatePdpResponse,
+                 "update pdp response bytes are stable");
+
+    const std::vector<uint8_t> activatePdpRequest = {
+        0x32, 0x16, 0x00, 0x25,
+        0x10, 0x00, 0x43, 0x21,
+        0x43, 0x24, 0x00, 0x00,
+        0x02, 0x21, 0x43, 0x65, 0x87, 0x09, 0x21, 0x43, 0xF5,
+        0x80, 0x00, 0x02, 0xF1, 0x33,
+        0x83, 0x00, 0x09, 0x08, 'a', 'c', 't', 'i', 'v', 'a', 't', 'e',
+        0x85, 0x00, 0x04, 0x0A, 0x17, 0x2A, 0x4D,
+    };
+
+    ok &= expect(vepc::parseGtpV1Header(activatePdpRequest, header, error), "activate pdp request header parses");
+    ok &= expect(vepc::parseInitiatePdpContextActivationRequest(activatePdpRequest, header, request, error), "activate pdp request body parses");
+    ok &= expect(request.hasImsi && request.imsi == "123456789012345", "activate pdp parser extracts IMSI");
+    ok &= expect(request.hasApn && request.apn == "activate", "activate pdp parser extracts APN");
+    ok &= expect(request.hasPdpType && request.pdpType == 0x33, "activate pdp parser extracts PDP type");
+    ok &= expect(request.hasGgsnIp && request.ggsnIp == "10.23.42.77", "activate pdp parser extracts GGSN IP");
+
+    const std::vector<uint8_t> expectedActivatePdpResponse = {
+        0x32, 0x17, 0x00, 0x06,
+        0x10, 0x00, 0x43, 0x21,
+        0x43, 0x24, 0x00, 0x00,
+        0x01, 0x80,
+    };
+    ok &= expect(vepc::buildInitiatePdpContextActivationResponse(header, 0x10004321u) == expectedActivatePdpResponse,
+                 "activate pdp response bytes are stable");
+
+    const std::vector<uint8_t> deletePdpRequest = {
+        0x32, 0x14, 0x00, 0x04,
+        0x10, 0x00, 0x43, 0x21,
+        0x43, 0x22, 0x00, 0x00,
+    };
+
+    ok &= expect(vepc::parseGtpV1Header(deletePdpRequest, header, error), "delete pdp request header parses");
+    ok &= expect(header.messageType == 0x14, "delete pdp parser extracts message type");
+    ok &= expect(header.teid == 0x10004321u, "delete pdp parser extracts teid");
+    ok &= expect(header.sequence == 0x4322, "delete pdp parser extracts sequence");
+
+    const std::vector<uint8_t> expectedDeletePdpResponse = {
+        0x32, 0x15, 0x00, 0x06,
+        0x10, 0x00, 0x43, 0x21,
+        0x43, 0x22, 0x00, 0x00,
+        0x01, 0x80,
+    };
+    ok &= expect(vepc::buildDeletePdpContextResponse(header) == expectedDeletePdpResponse,
+                 "delete pdp response bytes are stable");
+
     return ok ? 0 : 1;
 }

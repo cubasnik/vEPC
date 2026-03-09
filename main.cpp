@@ -1275,6 +1275,8 @@ private:
     InterfaceEndpointRuntime getInterfaceEndpointState(const InterfaceConfigEntry& entry) const;
     void setInterfaceEndpointState(const std::string& endpointKey, InterfaceEndpointRuntime runtimeState);
     void upsertPdpContext(const PDPContext& context);
+    bool tryGetPdpContext(uint32_t teid, PDPContext& context) const;
+    bool removePdpContext(uint32_t teid, PDPContext* removedContext = nullptr);
     void upsertUeContext(const UEContext& context);
     bool tryGetUeContext(const std::string& imsi, UEContext& context) const;
     void clearRuntimeState();
@@ -2252,6 +2254,29 @@ void VNodeController::upsertPdpContext(const PDPContext& context) {
     pdpContexts[context.teid] = context;
 }
 
+bool VNodeController::tryGetPdpContext(uint32_t teid, PDPContext& context) const {
+    std::lock_guard<std::mutex> lock(stateMutex);
+    const auto it = pdpContexts.find(teid);
+    if (it == pdpContexts.end()) {
+        return false;
+    }
+    context = it->second;
+    return true;
+}
+
+bool VNodeController::removePdpContext(uint32_t teid, PDPContext* removedContext) {
+    std::lock_guard<std::mutex> lock(stateMutex);
+    const auto it = pdpContexts.find(teid);
+    if (it == pdpContexts.end()) {
+        return false;
+    }
+    if (removedContext != nullptr) {
+        *removedContext = it->second;
+    }
+    pdpContexts.erase(it);
+    return true;
+}
+
 void VNodeController::upsertUeContext(const UEContext& context) {
     std::lock_guard<std::mutex> lock(stateMutex);
     ueContexts[context.imsi] = context;
@@ -2696,6 +2721,135 @@ bool VNodeController::handleRealGtpMessage(NativeSocket socketHandle,
 
         const std::vector<uint8_t> response = vepc::buildCreatePdpContextResponse(header, context.teid);
         return sendGtpResponse(socketHandle, peerAddr, response, peerIp, "Create PDP response", context.teid, header.sequence);
+    }
+
+    if (header.messageType == 0x12) {
+        vepc::CreatePdpRequestInfo request;
+        std::string requestError;
+        if (!vepc::parseUpdatePdpContextRequest(packet, header, request, requestError)) {
+            log("GTP", "Rejected Update PDP request from " + peerIp + ": " + requestError);
+            return true;
+        }
+
+        PDPContext context;
+        const bool found = tryGetPdpContext(header.teid, context);
+        if (found) {
+            context.sequence = header.sequence;
+            context.last_message_type = header.messageType;
+            context.peer_ip = peerIp;
+            context.updated_at = std::time(nullptr);
+            if (request.hasImsi) {
+                context.imsi = request.imsi;
+            }
+            if (request.hasApn) {
+                context.apn = request.apn;
+            }
+            if (request.hasGgsnIp) {
+                context.ggsn_ip = request.ggsnIp;
+            }
+            if (request.hasPdpType) {
+                context.pdp_type = request.pdpType;
+                context.has_pdp_type = true;
+            }
+            upsertPdpContext(context);
+        }
+
+        std::ostringstream parsedRequestLog;
+        parsedRequestLog << "Update PDP request parsed from " << peerIp
+                         << ": teid=0x" << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << header.teid
+                         << std::dec << std::setfill(' ')
+                         << ", updated=" << (found ? "yes" : "no");
+        if (request.hasApn) {
+            parsedRequestLog << ", apn=" << request.apn;
+        }
+        if (request.hasPdpType) {
+            PDPContext formatted;
+            formatted.pdp_type = request.pdpType;
+            formatted.has_pdp_type = true;
+            parsedRequestLog << ", pdp_type=" << formatPdpTypeValue(formatted);
+        }
+        if (request.hasGgsnIp) {
+            parsedRequestLog << ", ggsn_ip=" << request.ggsnIp;
+        }
+        log("GTP", parsedRequestLog.str());
+
+        const uint8_t cause = found ? 0x80 : 0xC0;
+        const std::vector<uint8_t> response = vepc::buildUpdatePdpContextResponse(header, header.teid, cause);
+        return sendGtpResponse(socketHandle, peerAddr, response, peerIp, "Update PDP response", header.teid, header.sequence);
+    }
+
+    if (header.messageType == 0x16) {
+        vepc::CreatePdpRequestInfo request;
+        std::string requestError;
+        if (!vepc::parseInitiatePdpContextActivationRequest(packet, header, request, requestError)) {
+            log("GTP", "Rejected Initiate PDP Context Activation request from " + peerIp + ": " + requestError);
+            return true;
+        }
+
+        PDPContext context;
+        const bool found = tryGetPdpContext(header.teid, context);
+        if (found) {
+            context.sequence = header.sequence;
+            context.last_message_type = header.messageType;
+            context.peer_ip = peerIp;
+            context.updated_at = std::time(nullptr);
+            if (request.hasImsi) {
+                context.imsi = request.imsi;
+            }
+            if (request.hasApn) {
+                context.apn = request.apn;
+            }
+            if (request.hasGgsnIp) {
+                context.ggsn_ip = request.ggsnIp;
+            }
+            if (request.hasPdpType) {
+                context.pdp_type = request.pdpType;
+                context.has_pdp_type = true;
+            }
+            upsertPdpContext(context);
+        }
+
+        std::ostringstream parsedRequestLog;
+        parsedRequestLog << "Initiate PDP Context Activation request parsed from " << peerIp
+                         << ": teid=0x" << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << header.teid
+                         << std::dec << std::setfill(' ')
+                         << ", activated=" << (found ? "yes" : "no");
+        if (request.hasApn) {
+            parsedRequestLog << ", apn=" << request.apn;
+        }
+        if (request.hasPdpType) {
+            PDPContext formatted;
+            formatted.pdp_type = request.pdpType;
+            formatted.has_pdp_type = true;
+            parsedRequestLog << ", pdp_type=" << formatPdpTypeValue(formatted);
+        }
+        if (request.hasGgsnIp) {
+            parsedRequestLog << ", ggsn_ip=" << request.ggsnIp;
+        }
+        log("GTP", parsedRequestLog.str());
+
+        const uint8_t cause = found ? 0x80 : 0xC0;
+        const std::vector<uint8_t> response = vepc::buildInitiatePdpContextActivationResponse(header, header.teid, cause);
+        return sendGtpResponse(socketHandle, peerAddr, response, peerIp, "Initiate PDP Context Activation response", header.teid, header.sequence);
+    }
+
+    if (header.messageType == 0x14) {
+        PDPContext removedContext;
+        const bool removed = removePdpContext(header.teid, &removedContext);
+
+        std::ostringstream parsedRequestLog;
+        parsedRequestLog << "Delete PDP request parsed from " << peerIp
+                         << ": teid=0x" << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << header.teid
+                         << std::dec << std::setfill(' ')
+                         << ", removed=" << (removed ? "yes" : "no");
+        if (removed && !removedContext.imsi.empty()) {
+            parsedRequestLog << ", imsi=" << removedContext.imsi;
+        }
+        log("GTP", parsedRequestLog.str());
+
+        const uint8_t cause = removed ? 0x80 : 0xC0;
+        const std::vector<uint8_t> response = vepc::buildDeletePdpContextResponse(header, cause);
+        return sendGtpResponse(socketHandle, peerAddr, response, peerIp, "Delete PDP response", header.teid, header.sequence);
     }
 
     return false;

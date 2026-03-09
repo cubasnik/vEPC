@@ -66,9 +66,45 @@ add_test(
     COMMAND ${CMAKE_COMMAND}
         -DVEPC_EXE=$<TARGET_FILE:vepc>
         -DRUNTIME_CLI_EXE=$<TARGET_FILE:test-runtime-cli>
-    -DS11_GTPC_CLIENT_EXE=$<TARGET_FILE:test-s11-gtpc-client>
+        -DS11_GTPC_CLIENT_EXE=$<TARGET_FILE:test-s11-gtpc-client>
         -DSOURCE_DIR=${CMAKE_SOURCE_DIR}
         -P ${CMAKE_SOURCE_DIR}/cmake/TestS11Telemetry.cmake
+)
+add_test(
+    NAME s11-delete-pdp-smoke
+    COMMAND ${CMAKE_COMMAND}
+        -DVEPC_EXE=$<TARGET_FILE:vepc>
+        -DRUNTIME_CLI_EXE=$<TARGET_FILE:test-runtime-cli>
+        -DS11_GTPC_CLIENT_EXE=$<TARGET_FILE:test-s11-gtpc-client>
+        -DSOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -P ${CMAKE_SOURCE_DIR}/cmake/TestS11DeletePdp.cmake
+)
+add_test(
+    NAME s11-update-pdp-smoke
+    COMMAND ${CMAKE_COMMAND}
+        -DVEPC_EXE=$<TARGET_FILE:vepc>
+        -DRUNTIME_CLI_EXE=$<TARGET_FILE:test-runtime-cli>
+        -DS11_GTPC_CLIENT_EXE=$<TARGET_FILE:test-s11-gtpc-client>
+        -DSOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -P ${CMAKE_SOURCE_DIR}/cmake/TestS11UpdatePdp.cmake
+)
+add_test(
+    NAME s11-activate-pdp-smoke
+    COMMAND ${CMAKE_COMMAND}
+        -DVEPC_EXE=$<TARGET_FILE:vepc>
+        -DRUNTIME_CLI_EXE=$<TARGET_FILE:test-runtime-cli>
+        -DS11_GTPC_CLIENT_EXE=$<TARGET_FILE:test-s11-gtpc-client>
+        -DSOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -P ${CMAKE_SOURCE_DIR}/cmake/TestS11ActivatePdp.cmake
+)
+add_test(
+    NAME s11-echo-smoke
+    COMMAND ${CMAKE_COMMAND}
+        -DVEPC_EXE=$<TARGET_FILE:vepc>
+        -DRUNTIME_CLI_EXE=$<TARGET_FILE:test-runtime-cli>
+        -DS11_GTPC_CLIENT_EXE=$<TARGET_FILE:test-s11-gtpc-client>
+        -DSOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -P ${CMAKE_SOURCE_DIR}/cmake/TestS11Echo.cmake
 )
 
 # Для Linux нужно добавить pthread

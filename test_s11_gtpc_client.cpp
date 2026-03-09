@@ -36,7 +36,7 @@ void closeSocket(NativeSocket socketHandle) {
 #endif
 }
 
-bool tryRoundTrip(std::string& error) {
+bool tryRoundTrip(const std::string& mode, std::string& error) {
 #ifdef _WIN32
     WSADATA wsaData{};
     if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
@@ -76,15 +76,100 @@ bool tryRoundTrip(std::string& error) {
         return false;
     }
 
-    const std::vector<uint8_t> request = {
-        0x32, 0x10, 0x00, 0x25,
-        0x00, 0x00, 0x00, 0x00,
-        0x43, 0x21, 0x00, 0x00,
-        0x02, 0x21, 0x43, 0x65, 0x87, 0x09, 0x21, 0x43, 0xF5,
-        0x80, 0x00, 0x02, 0xF1, 0x21,
-        0x83, 0x00, 0x09, 0x08, 'i', 'n', 't', 'e', 'r', 'n', 'e', 't',
-        0x85, 0x00, 0x04, 0x0A, 0x17, 0x2A, 0x05,
-    };
+    std::vector<uint8_t> request;
+    std::vector<uint8_t> expected;
+    uint8_t expectedMessageType = 0;
+    uint32_t expectedTeid = 0;
+    uint16_t expectedSequence = 0;
+
+    if (mode == "delete") {
+        request = {
+            0x32, 0x14, 0x00, 0x04,
+            0x10, 0x00, 0x43, 0x21,
+            0x43, 0x22, 0x00, 0x00,
+        };
+        expected = {
+            0x32, 0x15, 0x00, 0x06,
+            0x10, 0x00, 0x43, 0x21,
+            0x43, 0x22, 0x00, 0x00,
+            0x01, 0x80,
+        };
+        expectedMessageType = 0x15;
+        expectedTeid = 0x10004321u;
+        expectedSequence = 0x4322;
+    } else if (mode == "activate") {
+        request = {
+            0x32, 0x16, 0x00, 0x25,
+            0x10, 0x00, 0x43, 0x21,
+            0x43, 0x24, 0x00, 0x00,
+            0x02, 0x21, 0x43, 0x65, 0x87, 0x09, 0x21, 0x43, 0xF5,
+            0x80, 0x00, 0x02, 0xF1, 0x33,
+            0x83, 0x00, 0x09, 0x08, 'a', 'c', 't', 'i', 'v', 'a', 't', 'e',
+            0x85, 0x00, 0x04, 0x0A, 0x17, 0x2A, 0x4D,
+        };
+        expected = {
+            0x32, 0x17, 0x00, 0x06,
+            0x10, 0x00, 0x43, 0x21,
+            0x43, 0x24, 0x00, 0x00,
+            0x01, 0x80,
+        };
+        expectedMessageType = 0x17;
+        expectedTeid = 0x10004321u;
+        expectedSequence = 0x4324;
+    } else if (mode == "update") {
+        request = {
+            0x32, 0x12, 0x00, 0x21,
+            0x10, 0x00, 0x43, 0x21,
+            0x43, 0x23, 0x00, 0x00,
+            0x02, 0x21, 0x43, 0x65, 0x87, 0x09, 0x21, 0x43, 0xF5,
+            0x80, 0x00, 0x02, 0xF1, 0x57,
+            0x83, 0x00, 0x05, 0x04, 'c', 'o', 'r', 'p',
+            0x85, 0x00, 0x04, 0x0A, 0x17, 0x2A, 0x63,
+        };
+        expected = {
+            0x32, 0x13, 0x00, 0x06,
+            0x10, 0x00, 0x43, 0x21,
+            0x43, 0x23, 0x00, 0x00,
+            0x01, 0x80,
+        };
+        expectedMessageType = 0x13;
+        expectedTeid = 0x10004321u;
+        expectedSequence = 0x4323;
+    } else if (mode == "echo") {
+        request = {
+            0x32, 0x01, 0x00, 0x04,
+            0x00, 0x00, 0x00, 0x00,
+            0x12, 0x34, 0x00, 0x00,
+        };
+        expected = {
+            0x32, 0x02, 0x00, 0x06,
+            0x00, 0x00, 0x00, 0x00,
+            0x12, 0x34, 0x00, 0x00,
+            0x0E, 0x00,
+        };
+        expectedMessageType = 0x02;
+        expectedTeid = 0x00000000u;
+        expectedSequence = 0x1234;
+    } else {
+        request = {
+            0x32, 0x10, 0x00, 0x25,
+            0x00, 0x00, 0x00, 0x00,
+            0x43, 0x21, 0x00, 0x00,
+            0x02, 0x21, 0x43, 0x65, 0x87, 0x09, 0x21, 0x43, 0xF5,
+            0x80, 0x00, 0x02, 0xF1, 0x21,
+            0x83, 0x00, 0x09, 0x08, 'i', 'n', 't', 'e', 'r', 'n', 'e', 't',
+            0x85, 0x00, 0x04, 0x0A, 0x17, 0x2A, 0x05,
+        };
+        expected = {
+            0x32, 0x11, 0x00, 0x06,
+            0x10, 0x00, 0x43, 0x21,
+            0x43, 0x21, 0x00, 0x00,
+            0x01, 0x80,
+        };
+        expectedMessageType = 0x11;
+        expectedTeid = 0x10004321u;
+        expectedSequence = 0x4321;
+    }
 
 #ifdef _WIN32
     const int sent = sendto(socketHandle,
@@ -149,7 +234,7 @@ bool tryRoundTrip(std::string& error) {
         return false;
     }
 
-    if (header.messageType != 0x11) {
+    if (header.messageType != expectedMessageType) {
         error = "unexpected response message type";
         closeSocket(socketHandle);
 #ifdef _WIN32
@@ -157,7 +242,7 @@ bool tryRoundTrip(std::string& error) {
 #endif
         return false;
     }
-    if (header.teid != 0x10004321u) {
+    if (header.teid != expectedTeid) {
         error = "unexpected response teid";
         closeSocket(socketHandle);
 #ifdef _WIN32
@@ -165,7 +250,7 @@ bool tryRoundTrip(std::string& error) {
 #endif
         return false;
     }
-    if (header.sequence != 0x4321) {
+    if (header.sequence != expectedSequence) {
         error = "unexpected response sequence";
         closeSocket(socketHandle);
 #ifdef _WIN32
@@ -174,14 +259,8 @@ bool tryRoundTrip(std::string& error) {
         return false;
     }
 
-    const std::vector<uint8_t> expected = {
-        0x32, 0x11, 0x00, 0x06,
-        0x10, 0x00, 0x43, 0x21,
-        0x43, 0x21, 0x00, 0x00,
-        0x01, 0x80,
-    };
     if (response != expected) {
-        error = "response bytes differ from expected Create PDP response";
+        error = "response bytes differ from expected response";
         closeSocket(socketHandle);
 #ifdef _WIN32
         WSACleanup();
@@ -199,17 +278,26 @@ bool tryRoundTrip(std::string& error) {
 }  // namespace
 
 int main(int argc, char* argv[]) {
+    std::string mode = "create";
     int retries = 15;
     if (argc >= 2) {
-        retries = std::atoi(argv[1]);
+        mode = argv[1];
+    }
+    if (argc >= 3) {
+        retries = std::atoi(argv[2]);
         if (retries < 1) {
             retries = 1;
         }
     }
 
+    if (mode != "create" && mode != "activate" && mode != "update" && mode != "delete" && mode != "echo") {
+        std::cerr << "unsupported mode\n";
+        return 1;
+    }
+
     std::string error;
     for (int attempt = 0; attempt < retries; ++attempt) {
-        if (tryRoundTrip(error)) {
+        if (tryRoundTrip(mode, error)) {
             std::cout << "ok\n";
             return 0;
         }

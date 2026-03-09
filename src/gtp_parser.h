@@ -40,10 +40,26 @@ bool parseCreatePdpContextRequest(const std::vector<uint8_t>& packet,
                                   const GtpV1Header& header,
                                   CreatePdpRequestInfo& request,
                                   std::string& error);
+bool parseUpdatePdpContextRequest(const std::vector<uint8_t>& packet,
+                                  const GtpV1Header& header,
+                                  CreatePdpRequestInfo& request,
+                                  std::string& error);
+bool parseInitiatePdpContextActivationRequest(const std::vector<uint8_t>& packet,
+                                              const GtpV1Header& header,
+                                              CreatePdpRequestInfo& request,
+                                              std::string& error);
 std::string formatGtpMessageType(uint8_t messageType);
 std::vector<uint8_t> buildEchoResponse(const GtpV1Header& requestHeader, uint8_t recoveryRestartCounter = 0);
 std::vector<uint8_t> buildCreatePdpContextResponse(const GtpV1Header& requestHeader,
                                                    uint32_t responseTeid,
                                                    uint8_t cause = 0x80);
+std::vector<uint8_t> buildUpdatePdpContextResponse(const GtpV1Header& requestHeader,
+                                                   uint32_t responseTeid,
+                                                   uint8_t cause = 0x80);
+std::vector<uint8_t> buildDeletePdpContextResponse(const GtpV1Header& requestHeader,
+                                                   uint8_t cause = 0x80);
+std::vector<uint8_t> buildInitiatePdpContextActivationResponse(const GtpV1Header& requestHeader,
+                                                               uint32_t responseTeid,
+                                                               uint8_t cause = 0x80);
 
 }  // namespace vepc

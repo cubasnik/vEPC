@@ -496,6 +496,57 @@
    - Ожидаемый результат:
       - `S11` получает минимальный наблюдаемый `GTP-C` roundtrip path, в котором demo `Create PDP` не только доходит до сокета, но и приводит к обновлению `PDP contexts` и ответу в сеть
 
+4. Шаг 5.4: сделано
+   - Файлы: `main.cpp`, `src/gtp_parser.h`, `src/gtp_parser.cpp`, `test_gtp_parser.cpp`, `test_s11_gtpc_client.cpp`, `cmake/TestS11DeletePdp.cmake`, `CMakeLists.txt`
+   - Изменения:
+      - добавить минимальный `Delete PDP Context Request/Response` path для `S11`, удаляющий `PDP context` по `TEID` и возвращающий стабильный demo response
+      - расширить parser-level coverage для `Delete PDP Context` и научить `test-s11-gtpc-client` работать в режимах `create` и `delete`
+      - добавить smoke `s11-delete-pdp-smoke`, который доказывает последовательность `Create PDP -> state=1 -> Delete PDP -> state=0` и проверяет соответствующие `GTP` logs
+   - Проверка:
+      - `cmake --build build-win --config Release`
+      - `ctest --test-dir build-win -C Release -R "s11-(telemetry|delete-pdp)-smoke|gtp-parser-smoke" --output-on-failure`
+      - `ctest --test-dir build-win -C Release --output-on-failure`
+   - Ожидаемый результат:
+      - `S11` получает второй наблюдаемый `GTP-C` message type поверх уже работающего create-path и может не только создавать, но и удалять demo `PDP context`
+
+5. Шаг 5.5: сделано
+   - Файлы: `test_s11_gtpc_client.cpp`, `cmake/TestS11Echo.cmake`, `CMakeLists.txt`
+   - Изменения:
+      - расширить `test-s11-gtpc-client` режимом `echo`, который шлёт demo `Echo Request` и проверяет стабильный `Echo Response`
+      - добавить smoke `s11-echo-smoke`, который доказывает `S11 Echo Request/Response` roundtrip, проверяет `iface_status S11`, подтверждает отсутствие побочных изменений в `PDP contexts` и валидирует `GTP` echo logs
+   - Проверка:
+      - `cmake --build build-win --config Release`
+      - `ctest --test-dir build-win -C Release -R "s11-(echo|telemetry|delete-pdp)-smoke|gtp-parser-smoke" --output-on-failure`
+      - `ctest --test-dir build-win -C Release --output-on-failure`
+   - Ожидаемый результат:
+      - `S11` получает отдельный `GTP-C` liveness-path для `Echo Request/Response`, который наблюдаем через smoke-тесты и не меняет runtime state
+
+6. Шаг 5.6: сделано
+   - Файлы: `main.cpp`, `src/gtp_parser.h`, `src/gtp_parser.cpp`, `test_gtp_parser.cpp`, `test_s11_gtpc_client.cpp`, `cmake/TestS11UpdatePdp.cmake`, `CMakeLists.txt`
+   - Изменения:
+      - добавить минимальный `Update PDP Context Request/Response` path для `S11`, который обновляет существующий `PDP context` по `TEID` и отражает изменения в runtime state
+      - расширить parser-level coverage и helper `test-s11-gtpc-client` режимом `update` с проверкой стабильного `Update PDP Context Response`
+      - добавить smoke `s11-update-pdp-smoke`, который доказывает последовательность `Create PDP -> Update PDP -> state changed` и валидирует новые `APN`, `PDP Type` и `GGSN IP`
+   - Проверка:
+      - `cmake --build build-win --config Release`
+      - `ctest --test-dir build-win -C Release -R "gtp-parser-smoke|s11-(telemetry|update-pdp|delete-pdp|echo)-smoke" --output-on-failure`
+      - `ctest --test-dir build-win -C Release --output-on-failure`
+   - Ожидаемый результат:
+      - `S11` получает следующий session-management message type поверх уже работающего create/delete path и может обновлять demo `PDP context`, а не только создавать или удалять его
+
+7. Шаг 5.7: сделано
+   - Файлы: `main.cpp`, `src/gtp_parser.h`, `src/gtp_parser.cpp`, `test_gtp_parser.cpp`, `test_s11_gtpc_client.cpp`, `cmake/TestS11ActivatePdp.cmake`, `CMakeLists.txt`
+   - Изменения:
+      - добавить минимальный `Initiate PDP Context Activation Request/Response` path для `S11`, который обновляет существующий `PDP context` по `TEID`, фиксирует новый `Message Type` в runtime state и возвращает стабильный demo response
+      - расширить parser-level coverage и helper `test-s11-gtpc-client` режимом `activate` с проверкой стабильного `Initiate PDP Context Activation Response`
+      - добавить smoke `s11-activate-pdp-smoke`, который доказывает последовательность `Create PDP -> Initiate PDP Context Activation -> state changed` и валидирует новые `Message Type`, `APN`, `PDP Type` и `GGSN IP`
+   - Проверка:
+      - `cmake --build build-win --config Release`
+      - `ctest --test-dir build-win -C Release -R "gtp-parser-smoke|s11-(telemetry|activate-pdp|update-pdp|delete-pdp|echo)-smoke" --output-on-failure`
+      - `ctest --test-dir build-win -C Release --output-on-failure`
+   - Ожидаемый результат:
+      - `S11` получает ещё один наблюдаемый session-management path поверх create/update/delete, в котором runtime state отражает фазу `Initiate PDP Context Activation`, а не только общий факт обновления контекста
+
 ## Ближайший план (рекомендуемый порядок)
 
 1. Закрыть `Этап 0.6`: help по режимам, структурированные обёртки для всех runtime-команд, стабильные smoke tests.

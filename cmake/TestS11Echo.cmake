@@ -17,7 +17,7 @@ if(NOT DEFINED SOURCE_DIR)
 endif()
 
 if(NOT WIN32)
-	message(FATAL_ERROR "TestS11Telemetry.cmake currently supports Windows only")
+	message(FATAL_ERROR "TestS11Echo.cmake currently supports Windows only")
 endif()
 
 set(LOG_DIR "${SOURCE_DIR}/build/logs")
@@ -30,7 +30,9 @@ file(MAKE_DIRECTORY "${STATE_DIR}")
 file(REMOVE "${LOG_FILE}")
 file(REMOVE "${STATE_FILE}")
 
-set(START_SCRIPT "$proc = Start-Process -FilePath '${VEPC_EXE}' -PassThru\n$proc.Id\n")
+set(START_SCRIPT "$proc = Start-Process -FilePath '${VEPC_EXE}' -PassThru
+$proc.Id
+")
 
 execute_process(
 	COMMAND powershell -NoProfile -Command "${START_SCRIPT}"
@@ -50,17 +52,13 @@ if(NOT VEPC_PID MATCHES "^[0-9]+$")
 endif()
 
 execute_process(
-	COMMAND "${S11_GTPC_CLIENT_EXE}" create 15
+	COMMAND "${S11_GTPC_CLIENT_EXE}" echo 15
 	WORKING_DIRECTORY "${SOURCE_DIR}"
-	RESULT_VARIABLE SEND_RESULT
-	OUTPUT_VARIABLE SEND_OUTPUT
-	ERROR_VARIABLE SEND_ERROR
+	RESULT_VARIABLE ECHO_RESULT
+	OUTPUT_VARIABLE ECHO_OUTPUT
+	ERROR_VARIABLE ECHO_ERROR
 	TIMEOUT 20
 )
-if(NOT SEND_RESULT EQUAL 0)
-	execute_process(COMMAND taskkill /PID ${VEPC_PID} /F OUTPUT_QUIET ERROR_QUIET)
-	message(FATAL_ERROR "Failed to complete S11 GTP-C roundtrip: ${SEND_OUTPUT} ${SEND_ERROR}")
-endif()
 
 execute_process(
 	COMMAND "${RUNTIME_CLI_EXE}" "iface_status S11" 20
@@ -86,6 +84,9 @@ execute_process(
 	ERROR_QUIET
 )
 
+if(NOT ECHO_RESULT EQUAL 0)
+	message(FATAL_ERROR "Failed to complete S11 Echo roundtrip: ${ECHO_OUTPUT} ${ECHO_ERROR}")
+endif()
 if(NOT STATUS_RESULT EQUAL 0)
 	message(FATAL_ERROR "Failed to query S11 interface status via CLI: ${STATUS_ERROR}")
 endif()
@@ -93,40 +94,23 @@ if(NOT STATE_RESULT EQUAL 0)
 	message(FATAL_ERROR "Failed to query runtime state via CLI: ${STATE_ERROR}")
 endif()
 
-set(CLI_OUTPUT "${STATUS_OUTPUT}\n${STATE_OUTPUT}")
+set(CLI_OUTPUT "${STATUS_OUTPUT}
+${STATE_OUTPUT}")
 
 if(NOT CLI_OUTPUT MATCHES "Interface S11 status:")
 	message(FATAL_ERROR "Expected S11 interface status in CLI output. Output: ${CLI_OUTPUT}")
 endif()
-if(NOT CLI_OUTPUT MATCHES "Effective Bind: 127\\.0\\.0\\.1:2123")
-	message(FATAL_ERROR "Expected effective S11 bind IP in CLI output. Output: ${CLI_OUTPUT}")
-endif()
 if(NOT CLI_OUTPUT MATCHES "Rx Packets:[ ]+[1-9][0-9]*")
 	message(FATAL_ERROR "Expected non-zero packet counter in CLI output. Output: ${CLI_OUTPUT}")
-endif()
-if(NOT CLI_OUTPUT MATCHES "Rx Bytes:[ ]+[1-9][0-9]*")
-	message(FATAL_ERROR "Expected non-zero byte counter in CLI output. Output: ${CLI_OUTPUT}")
 endif()
 if(NOT CLI_OUTPUT MATCHES "Last Peer:[ ]+127\\.0\\.0\\.1")
 	message(FATAL_ERROR "Expected sender IP in CLI output. Output: ${CLI_OUTPUT}")
 endif()
-if(NOT CLI_OUTPUT MATCHES "Endpoint telemetry:")
-	message(FATAL_ERROR "Expected endpoint telemetry block in state output. Output: ${CLI_OUTPUT}")
+if(NOT CLI_OUTPUT MATCHES "PDP contexts: 0")
+	message(FATAL_ERROR "Expected Echo path to leave PDP contexts empty. Output: ${CLI_OUTPUT}")
 endif()
-if(NOT CLI_OUTPUT MATCHES "- Name: S11")
-	message(FATAL_ERROR "Expected S11 endpoint telemetry entry in state output. Output: ${CLI_OUTPUT}")
-endif()
-if(NOT CLI_OUTPUT MATCHES "PDP contexts: 1")
-	message(FATAL_ERROR "Expected PDP context created by S11 Create PDP request. Output: ${CLI_OUTPUT}")
-endif()
-if(NOT CLI_OUTPUT MATCHES "- TEID: 0x10004321")
-	message(FATAL_ERROR "Expected assigned TEID from S11 Create PDP flow. Output: ${CLI_OUTPUT}")
-endif()
-if(NOT CLI_OUTPUT MATCHES "IMSI: 123456789012345")
-	message(FATAL_ERROR "Expected IMSI from parsed S11 Create PDP request. Output: ${CLI_OUTPUT}")
-endif()
-if(NOT CLI_OUTPUT MATCHES "APN: internet")
-	message(FATAL_ERROR "Expected APN from parsed S11 Create PDP request. Output: ${CLI_OUTPUT}")
+if(NOT CLI_OUTPUT MATCHES "PDP context details: none")
+	message(FATAL_ERROR "Expected no PDP details after Echo path. Output: ${CLI_OUTPUT}")
 endif()
 
 if(NOT EXISTS "${LOG_FILE}")
@@ -134,15 +118,9 @@ if(NOT EXISTS "${LOG_FILE}")
 endif()
 
 file(READ "${LOG_FILE}" LOG_CONTENT)
-if(NOT LOG_CONTENT MATCHES "Interface endpoint S11 ready on 127\\.0\\.0\\.1:2123")
-	message(FATAL_ERROR "Missing S11 endpoint startup log entry")
+if(NOT LOG_CONTENT MATCHES "Parsed GTPv1-C header from 127\\.0\\.0\\.1: type=Echo Request")
+	message(FATAL_ERROR "Missing S11 Echo parse log entry")
 endif()
-if(NOT LOG_CONTENT MATCHES "Parsed GTPv1-C header from 127\\.0\\.0\\.1: type=Create PDP Context Request")
-	message(FATAL_ERROR "Missing S11 GTP-C parse log entry")
-endif()
-if(NOT LOG_CONTENT MATCHES "Create PDP request parsed from 127\\.0\\.0\\.1: imsi=123456789012345, apn=internet")
-	message(FATAL_ERROR "Missing Create PDP request details in log")
-endif()
-if(NOT LOG_CONTENT MATCHES "Sent Create PDP response to 127\\.0\\.0\\.1: teid=0x10004321")
-	message(FATAL_ERROR "Missing Create PDP response log entry")
+if(NOT LOG_CONTENT MATCHES "Sent Echo Response to 127\\.0\\.0\\.1: teid=0x00000000")
+	message(FATAL_ERROR "Missing S11 Echo response log entry")
 endif()

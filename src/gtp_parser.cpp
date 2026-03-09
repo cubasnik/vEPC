@@ -107,6 +107,93 @@ void appendOptionalFields(std::vector<uint8_t>& response, const GtpV1Header& req
     response.push_back(requestHeader.hasExtensionHeader ? requestHeader.nextExtensionHeaderType : 0x00);
 }
 
+bool parseDemoPdpContextRequest(const std::vector<uint8_t>& packet,
+                               const GtpV1Header& header,
+                               uint8_t expectedMessageType,
+                               const char* label,
+                               CreatePdpRequestInfo& request,
+                               std::string& error) {
+    request = {};
+    error.clear();
+
+    if (header.messageType != expectedMessageType) {
+        error = std::string("GTP message is not ") + label;
+        return false;
+    }
+    if (header.totalLength > packet.size() || header.headerLength > packet.size()) {
+        error = "GTP header boundaries exceed packet size";
+        return false;
+    }
+
+    std::size_t offset = header.headerLength;
+    while (offset < header.totalLength) {
+        const uint8_t ieType = packet[offset];
+
+        if (ieType == 0x02) {
+            if (offset + 9 > header.totalLength) {
+                error = "truncated IMSI IE";
+                return false;
+            }
+            request.imsi = decodeTbcdDigits(&packet[offset + 1], 8);
+            request.hasImsi = !request.imsi.empty();
+            offset += 9;
+            continue;
+        }
+
+        if (offset + 3 > header.totalLength) {
+            error = "truncated TLV IE header";
+            return false;
+        }
+
+        const uint16_t ieLength = readUint16Be(&packet[offset + 1]);
+        const std::size_t valueOffset = offset + 3;
+        const std::size_t nextOffset = valueOffset + ieLength;
+        if (nextOffset > header.totalLength) {
+            error = "truncated TLV IE payload";
+            return false;
+        }
+
+        const uint8_t* value = &packet[valueOffset];
+        switch (ieType) {
+        case 0x80:
+            if (ieLength >= 2) {
+                request.pdpType = value[1];
+                request.hasPdpType = true;
+            }
+            break;
+        case 0x83: {
+            std::string apnError;
+            request.apn = decodeAccessPointName(value, ieLength, apnError);
+            if (!apnError.empty()) {
+                error = apnError;
+                return false;
+            }
+            request.hasApn = !request.apn.empty();
+            break;
+        }
+        case 0x85: {
+            const std::string ip = decodeIpv4Address(value, ieLength);
+            if (!ip.empty() && !request.hasGgsnIp) {
+                request.ggsnIp = ip;
+                request.hasGgsnIp = true;
+            }
+            break;
+        }
+        default:
+            break;
+        }
+
+        offset = nextOffset;
+    }
+
+    if (!request.hasImsi && !request.hasApn && !request.hasGgsnIp && !request.hasPdpType) {
+        error = std::string(label) + " does not contain any supported demo IEs";
+        return false;
+    }
+
+    return true;
+}
+
 }  // namespace
 
 std::string formatGtpMessageType(uint8_t messageType) {
@@ -119,6 +206,18 @@ std::string formatGtpMessageType(uint8_t messageType) {
         return "Create PDP Context Request (0x10)";
     case 0x11:
         return "Create PDP Context Response (0x11)";
+    case 0x12:
+        return "Update PDP Context Request (0x12)";
+    case 0x13:
+        return "Update PDP Context Response (0x13)";
+    case 0x14:
+        return "Delete PDP Context Request (0x14)";
+    case 0x15:
+        return "Delete PDP Context Response (0x15)";
+    case 0x16:
+        return "Initiate PDP Context Activation Request (0x16)";
+    case 0x17:
+        return "Initiate PDP Context Activation Response (0x17)";
     default: {
         std::ostringstream oss;
         oss << "0x" << std::uppercase << std::hex << std::setw(2) << std::setfill('0')
@@ -191,85 +290,36 @@ bool parseCreatePdpContextRequest(const std::vector<uint8_t>& packet,
                                   const GtpV1Header& header,
                                   CreatePdpRequestInfo& request,
                                   std::string& error) {
-    request = {};
-    error.clear();
+    return parseDemoPdpContextRequest(packet,
+                                      header,
+                                      0x10,
+                                      "Create PDP Context Request",
+                                      request,
+                                      error);
+}
 
-    if (header.messageType != 0x10) {
-        error = "GTP message is not Create PDP Context Request";
-        return false;
-    }
-    if (header.totalLength > packet.size() || header.headerLength > packet.size()) {
-        error = "GTP header boundaries exceed packet size";
-        return false;
-    }
+bool parseUpdatePdpContextRequest(const std::vector<uint8_t>& packet,
+                                  const GtpV1Header& header,
+                                  CreatePdpRequestInfo& request,
+                                  std::string& error) {
+    return parseDemoPdpContextRequest(packet,
+                                      header,
+                                      0x12,
+                                      "Update PDP Context Request",
+                                      request,
+                                      error);
+}
 
-    std::size_t offset = header.headerLength;
-    while (offset < header.totalLength) {
-        const uint8_t ieType = packet[offset];
-
-        if (ieType == 0x02) {
-            if (offset + 9 > header.totalLength) {
-                error = "truncated IMSI IE";
-                return false;
-            }
-            request.imsi = decodeTbcdDigits(&packet[offset + 1], 8);
-            request.hasImsi = !request.imsi.empty();
-            offset += 9;
-            continue;
-        }
-
-        if (offset + 3 > header.totalLength) {
-            error = "truncated TLV IE header";
-            return false;
-        }
-
-        const uint16_t ieLength = readUint16Be(&packet[offset + 1]);
-        const std::size_t valueOffset = offset + 3;
-        const std::size_t nextOffset = valueOffset + ieLength;
-        if (nextOffset > header.totalLength) {
-            error = "truncated TLV IE payload";
-            return false;
-        }
-
-        const uint8_t* value = &packet[valueOffset];
-        switch (ieType) {
-        case 0x80:
-            if (ieLength >= 2) {
-                request.pdpType = value[1];
-                request.hasPdpType = true;
-            }
-            break;
-        case 0x83: {
-            std::string apnError;
-            request.apn = decodeAccessPointName(value, ieLength, apnError);
-            if (!apnError.empty()) {
-                error = apnError;
-                return false;
-            }
-            request.hasApn = !request.apn.empty();
-            break;
-        }
-        case 0x85: {
-            const std::string ip = decodeIpv4Address(value, ieLength);
-            if (!ip.empty() && !request.hasGgsnIp) {
-                request.ggsnIp = ip;
-                request.hasGgsnIp = true;
-            }
-            break;
-        }
-        default:
-            break;
-        }
-
-        offset = nextOffset;
-    }
-
-    if (!request.hasImsi && !request.hasApn && !request.hasGgsnIp && !request.hasPdpType) {
-        error = "Create PDP request does not contain any supported demo IEs";
-        return false;
-    }
-
-    return true;
+bool parseInitiatePdpContextActivationRequest(const std::vector<uint8_t>& packet,
+                                              const GtpV1Header& header,
+                                              CreatePdpRequestInfo& request,
+                                              std::string& error) {
+    return parseDemoPdpContextRequest(packet,
+                                      header,
+                                      0x16,
+                                      "Initiate PDP Context Activation Request",
+                                      request,
+                                      error);
 }
 
 std::vector<uint8_t> buildEchoResponse(const GtpV1Header& requestHeader, uint8_t recoveryRestartCounter) {
@@ -310,6 +360,86 @@ std::vector<uint8_t> buildCreatePdpContextResponse(const GtpV1Header& requestHea
 
     response.push_back(buildResponseFlags(requestHeader));
     response.push_back(0x11);
+    response.push_back(static_cast<uint8_t>((payloadLength >> 8) & 0xFF));
+    response.push_back(static_cast<uint8_t>(payloadLength & 0xFF));
+    response.push_back(static_cast<uint8_t>((responseTeid >> 24) & 0xFF));
+    response.push_back(static_cast<uint8_t>((responseTeid >> 16) & 0xFF));
+    response.push_back(static_cast<uint8_t>((responseTeid >> 8) & 0xFF));
+    response.push_back(static_cast<uint8_t>(responseTeid & 0xFF));
+
+    appendOptionalFields(response, requestHeader);
+
+    response.push_back(0x01);
+    response.push_back(cause);
+    return response;
+}
+
+std::vector<uint8_t> buildUpdatePdpContextResponse(const GtpV1Header& requestHeader,
+                                                   uint32_t responseTeid,
+                                                   uint8_t cause) {
+    const bool hasOptionalFields = requestHeader.hasExtensionHeader
+        || requestHeader.hasSequenceNumber
+        || requestHeader.hasNpduNumber;
+    const uint16_t payloadLength = static_cast<uint16_t>((hasOptionalFields ? 4 : 0) + 2);
+
+    std::vector<uint8_t> response;
+    response.reserve(8 + (hasOptionalFields ? 4 : 0) + 2);
+
+    response.push_back(buildResponseFlags(requestHeader));
+    response.push_back(0x13);
+    response.push_back(static_cast<uint8_t>((payloadLength >> 8) & 0xFF));
+    response.push_back(static_cast<uint8_t>(payloadLength & 0xFF));
+    response.push_back(static_cast<uint8_t>((responseTeid >> 24) & 0xFF));
+    response.push_back(static_cast<uint8_t>((responseTeid >> 16) & 0xFF));
+    response.push_back(static_cast<uint8_t>((responseTeid >> 8) & 0xFF));
+    response.push_back(static_cast<uint8_t>(responseTeid & 0xFF));
+
+    appendOptionalFields(response, requestHeader);
+
+    response.push_back(0x01);
+    response.push_back(cause);
+    return response;
+}
+
+std::vector<uint8_t> buildDeletePdpContextResponse(const GtpV1Header& requestHeader,
+                                                   uint8_t cause) {
+    const bool hasOptionalFields = requestHeader.hasExtensionHeader
+        || requestHeader.hasSequenceNumber
+        || requestHeader.hasNpduNumber;
+    const uint16_t payloadLength = static_cast<uint16_t>((hasOptionalFields ? 4 : 0) + 2);
+
+    std::vector<uint8_t> response;
+    response.reserve(8 + (hasOptionalFields ? 4 : 0) + 2);
+
+    response.push_back(buildResponseFlags(requestHeader));
+    response.push_back(0x15);
+    response.push_back(static_cast<uint8_t>((payloadLength >> 8) & 0xFF));
+    response.push_back(static_cast<uint8_t>(payloadLength & 0xFF));
+    response.push_back(static_cast<uint8_t>((requestHeader.teid >> 24) & 0xFF));
+    response.push_back(static_cast<uint8_t>((requestHeader.teid >> 16) & 0xFF));
+    response.push_back(static_cast<uint8_t>((requestHeader.teid >> 8) & 0xFF));
+    response.push_back(static_cast<uint8_t>(requestHeader.teid & 0xFF));
+
+    appendOptionalFields(response, requestHeader);
+
+    response.push_back(0x01);
+    response.push_back(cause);
+    return response;
+}
+
+std::vector<uint8_t> buildInitiatePdpContextActivationResponse(const GtpV1Header& requestHeader,
+                                                               uint32_t responseTeid,
+                                                               uint8_t cause) {
+    const bool hasOptionalFields = requestHeader.hasExtensionHeader
+        || requestHeader.hasSequenceNumber
+        || requestHeader.hasNpduNumber;
+    const uint16_t payloadLength = static_cast<uint16_t>((hasOptionalFields ? 4 : 0) + 2);
+
+    std::vector<uint8_t> response;
+    response.reserve(8 + (hasOptionalFields ? 4 : 0) + 2);
+
+    response.push_back(buildResponseFlags(requestHeader));
+    response.push_back(0x17);
     response.push_back(static_cast<uint8_t>((payloadLength >> 8) & 0xFF));
     response.push_back(static_cast<uint8_t>(payloadLength & 0xFF));
     response.push_back(static_cast<uint8_t>((responseTeid >> 24) & 0xFF));
