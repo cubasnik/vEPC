@@ -1,0 +1,52 @@
+# Multi-stage build for vEPC
+FROM ubuntu:22.04 AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    cmake \
+    git \
+    libreadline-dev \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+
+COPY . /build
+
+RUN mkdir -p build && cd build && \
+    cmake .. && \
+    make -j$(nproc)
+
+FROM ubuntu:22.04
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    iproute2 \
+    net-tools \
+    tcpdump \
+    curl \
+    libreadline8 \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN useradd -m -u 1000 vepc && \
+    mkdir -p /app /etc/vepc /var/log/vepc && \
+    chown -R vepc:vepc /app /etc/vepc /var/log/vepc
+
+WORKDIR /app
+
+COPY --from=builder /build/build/vepc /app/vepc
+COPY --from=builder /build/build/vepc-cli /app/vepc-cli
+COPY --from=builder /build/config/* /etc/vepc/
+
+RUN chown -R vepc:vepc /app /etc/vepc
+
+USER vepc
+
+EXPOSE 2123/udp 36412/sctp 3868/udp 5555/tcp
+
+VOLUME ["/etc/vepc", "/var/log/vepc"]
+
+CMD ["/app/vepc", "--config=/etc/vepc"]
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD /app/vepc-cli status | grep -q "UP" || exit 1
