@@ -7,17 +7,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     cmake \
     git \
+    libreadline-dev \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /build
 
-# Clone the repository from GitHub
-ARG REPO_URL=https://github.com/your-org/vEPC.git
-ARG REPO_BRANCH=main
-
-RUN git clone --branch ${REPO_BRANCH} ${REPO_URL} . || true
+# Use source files from build context
+COPY . /build
 
 # Build the project
 RUN mkdir -p build && cd build && \
@@ -33,6 +31,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     net-tools \
     tcpdump \
     curl \
+    libreadline8 \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 

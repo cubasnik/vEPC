@@ -1,13 +1,8 @@
-version: '3.8'
-
 services:
   vepc:
     build:
       context: .
       dockerfile: Dockerfile
-      args:
-        REPO_URL: https://github.com/your-org/vEPC.git
-        REPO_BRANCH: main
     
     container_name: vepc-mme-sgsn
     hostname: vepc
