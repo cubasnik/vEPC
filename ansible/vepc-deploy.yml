@@ -1,0 +1,356 @@
+---
+# Ansible Playbook for vEPC Deployment
+# Target: Ubuntu 22 LTS and higher
+# Requirements: Ansible 2.9+, Python 3.8+
+
+---
+- name: Deploy vEPC (Evolved Packet Core) Emulator
+  hosts: vepc_hosts
+  become: yes
+  become_method: sudo
+  
+  vars:
+    # Repository configuration
+    vepc_repo_url: "https://github.com/your-org/vEPC.git"
+    vepc_repo_branch: "main"
+    vepc_repo_path: "/opt/vepc"
+    
+    # User and group
+    vepc_user: "vepc"
+    vepc_group: "vepc"
+    vepc_uid: 1000
+    vepc_gid: 1000
+    
+    # Build paths
+    build_path: "{{ vepc_repo_path }}/build"
+    
+    # Configuration
+    config_path: "/etc/vepc"
+    log_path: "/var/log/vepc"
+    
+    # Ports (can be overridden per host)
+    gtp_c_port: 2123
+    s1ap_port: 36412
+    diameter_port: 3868
+    cli_port: 5555
+    
+    # Docker configuration
+    docker_registry: "docker.io"
+    vepc_docker_image: "vepc:latest"
+    vepc_container_name: "vepc-mme-sgsn"
+    
+    # Network configuration
+    enable_network_namespaces: true
+    mcc: "250"
+    mnc: "20"
+    
+  pre_tasks:
+    - name: Validate target OS
+      assert:
+        that:
+          - ansible_distribution == "Ubuntu"
+          - ansible_distribution_version is version('22.04', '>=')
+        fail_msg: "This playbook requires Ubuntu 22.04 LTS or higher"
+
+  tasks:
+    # ==================== System Preparation ====================
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install system dependencies
+      apt:
+        name:
+          - build-essential
+          - cmake
+          - git
+          - curl
+          - wget
+          - net-tools
+          - iproute2
+          - tcpdump
+          - jq
+          - python3
+          - python3-pip
+          - ca-certificates
+          - gnupg
+          - lsb-release
+        state: present
+
+    # ==================== Docker Installation ====================
+    - name: Add Docker GPG key
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+
+    - name: Add Docker repository
+      apt_repository:
+        repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+        state: present
+
+    - name: Install Docker
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-compose-plugin
+        state: present
+
+    - name: Start Docker service
+      service:
+        name: docker
+        state: started
+        enabled: yes
+
+    # ==================== User and Directory Setup ====================
+    - name: Create vepc group
+      group:
+        name: "{{ vepc_group }}"
+        gid: "{{ vepc_gid }}"
+        state: present
+
+    - name: Create vepc user
+      user:
+        name: "{{ vepc_user }}"
+        group: "{{ vepc_group }}"
+        uid: "{{ vepc_uid }}"
+        home: "/home/{{ vepc_user }}"
+        shell: /bin/bash
+        createhome: yes
+        state: present
+
+    - name: Add vepc user to docker group
+      user:
+        name: "{{ vepc_user }}"
+        groups: docker
+        append: yes
+
+    - name: Create required directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ vepc_user }}"
+        group: "{{ vepc_group }}"
+        mode: '0755'
+      loop:
+        - "{{ vepc_repo_path }}"
+        - "{{ config_path }}"
+        - "{{ log_path }}"
+        - "/opt/vepc/scripts"
+
+    # ==================== Repository Setup ====================
+    - name: Check if repository exists
+      stat:
+        path: "{{ vepc_repo_path }}/.git"
+      register: repo_stat
+
+    - name: Clone vEPC repository
+      git:
+        repo: "{{ vepc_repo_url }}"
+        dest: "{{ vepc_repo_path }}"
+        version: "{{ vepc_repo_branch }}"
+        force: yes
+      become: no
+      become_user: "{{ vepc_user }}"
+      when: not repo_stat.stat.exists
+
+    - name: Update existing repository
+      shell: |
+        cd {{ vepc_repo_path }}
+        git fetch origin
+        git checkout {{ vepc_repo_branch }}
+        git pull origin {{ vepc_repo_branch }}
+      become: no
+      become_user: "{{ vepc_user }}"
+      when: repo_stat.stat.exists
+      register: git_pull
+      changed_when: "'Already up to date' not in git_pull.stdout"
+
+    # ==================== Docker Build ====================
+    - name: Build Docker image from Dockerfile
+      docker_image:
+        name: "{{ vepc_docker_image }}"
+        build:
+          path: "{{ vepc_repo_path }}"
+          dockerfile: Dockerfile
+          args:
+            REPO_URL: "{{ vepc_repo_url }}"
+            REPO_BRANCH: "{{ vepc_repo_branch }}"
+        source: build
+        state: present
+      register: docker_build
+      notify: restart vepc container
+
+    # ==================== Configuration ====================
+    - name: Copy vEPC configuration files
+      template:
+        src: "{{ item.src }}"
+        dest: "{{ config_path }}/{{ item.dest }}"
+        owner: "{{ vepc_user }}"
+        group: "{{ vepc_group }}"
+        mode: '0644'
+        backup: yes
+      loop:
+        - { src: "config/vepc.config.j2", dest: "vepc.config" }
+        - { src: "config/interfaces.conf.j2", dest: "interfaces.conf" }
+        - { src: "config/vmme.conf.j2", dest: "vmme.conf" }
+        - { src: "config/vsgsn.conf.j2", dest: "vsgsn.conf" }
+      notify: restart vepc container
+
+    # ==================== Docker Compose Setup ====================
+    - name: Deploy docker-compose.yml
+      template:
+        src: "docker-compose.yml.j2"
+        dest: "{{ vepc_repo_path }}/docker-compose.yml"
+        owner: "{{ vepc_user }}"
+        group: "{{ vepc_group }}"
+        mode: '0644'
+      notify: restart vepc container
+
+    # ==================== Container Deployment ====================
+    - name: Start vEPC container with docker-compose
+      shell: |
+        cd {{ vepc_repo_path }}
+        docker-compose up -d
+      become: no
+      become_user: "{{ vepc_user }}"
+      environment:
+        REPO_URL: "{{ vepc_repo_url }}"
+        REPO_BRANCH: "{{ vepc_repo_branch }}"
+      register: compose_result
+      changed_when: "'Creating' in compose_result.stdout or 'Starting' in compose_result.stdout"
+
+    - name: Wait for vEPC service to be ready
+      wait_for:
+        host: "localhost"
+        port: "{{ cli_port }}"
+        delay: 5
+        timeout: 60
+      ignore_errors: yes
+
+    # ==================== Health Check ====================
+    - name: Verify vEPC container is running
+      docker_container_info:
+        name: "{{ vepc_container_name }}"
+      register: container_info
+      failed_when: container_info.exists == false or container_info.container['State']['Running'] == false
+
+    - name: Check vEPC service health
+      command: docker exec {{ vepc_container_name }} /app/vepc-cli status
+      register: health_check
+      changed_when: false
+      failed_when: health_check.rc != 0
+      ignore_errors: yes
+
+    # ==================== Systemd Service ====================
+    - name: Create systemd service file for vEPC
+      template:
+        src: "vepc.service.j2"
+        dest: "/etc/systemd/system/vepc.service"
+        mode: '0644'
+      notify:
+        - reload systemd
+        - enable vepc service
+
+    - name: Reload systemd daemon
+      systemd:
+        daemon_reload: yes
+
+    - name: Enable vEPC service
+      systemd:
+        name: vepc
+        enabled: yes
+
+    # ==================== Firewall Configuration ====================
+    - name: Configure UFW firewall rules
+      ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: "{{ 'tcp' if item == cli_port else 'udp' }}"
+        state: enabled
+      loop:
+        - "{{ gtp_c_port }}"
+        - "{{ s1ap_port }}"
+        - "{{ diameter_port }}"
+        - "{{ cli_port }}"
+      when: ansible_distribution == "Ubuntu"
+      ignore_errors: yes
+
+    # ==================== Network Configuration ====================
+    - name: Enable IP forwarding
+      sysctl:
+        name: net.ipv4.ip_forward
+        value: '1'
+        state: present
+        reload: yes
+
+    - name: Configure network namespace isolation
+      sysctl:
+        name: "{{ item }}"
+        value: '1'
+        state: present
+        reload: yes
+      loop:
+        - net.ipv4.conf.all.forwarding
+        - net.ipv6.conf.all.forwarding
+      when: enable_network_namespaces | bool
+
+    # ==================== Post-deployment ====================
+    - name: Create deployment summary
+      template:
+        src: "deployment_info.txt.j2"
+        dest: "{{ log_path }}/deployment_info.txt"
+        owner: "{{ vepc_user }}"
+        group: "{{ vepc_group }}"
+        mode: '0644'
+
+    - name: Display deployment information
+      debug:
+        msg: |
+          ============================================
+          vEPC Deployment Summary
+          ============================================
+          Repository: {{ vepc_repo_url }}
+          Branch: {{ vepc_repo_branch }}
+          Location: {{ vepc_repo_path }}
+          Config: {{ config_path }}
+          Logs: {{ log_path }}
+          
+          Container: {{ vepc_container_name }}
+          Image: {{ vepc_docker_image }}
+          
+          Services:
+          - GTP-C: localhost:{{ gtp_c_port }}/udp
+          - S1AP: localhost:{{ s1ap_port }}/sctp
+          - Diameter: localhost:{{ diameter_port }}/udp
+          - CLI: localhost:{{ cli_port }}/tcp
+          
+          Optional use to access the CLI:
+          $ docker-compose -f {{ vepc_repo_path }}/docker-compose.yml exec vepc /app/vepc-cli
+          
+          View logs:
+          $ docker logs -f {{ vepc_container_name }}
+          
+          Restart the service:
+          $ sudo systemctl restart vepc
+          ============================================
+
+  handlers:
+    - name: reload systemd
+      systemd:
+        daemon_reload: yes
+
+    - name: enable vepc service
+      systemd:
+        name: vepc
+        enabled: yes
+
+    - name: restart vepc container
+      shell: |
+        cd {{ vepc_repo_path }}
+        docker-compose restart
+      become: no
+      become_user: "{{ vepc_user }}"
+      ignore_errors: yes

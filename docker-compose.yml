@@ -1,0 +1,78 @@
+version: '3.8'
+
+services:
+  vepc:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        REPO_URL: https://github.com/your-org/vEPC.git
+        REPO_BRANCH: main
+    
+    container_name: vepc-mme-sgsn
+    hostname: vepc
+    
+    # Network capabilities needed for interface management
+    cap_add:
+      - SYS_ADMIN
+      - NET_ADMIN
+      - SYS_PTRACE
+    
+    # Privileged mode for full network access (use with caution)
+    # privileged: true
+    
+    ports:
+      # GTP-C signaling (UDP)
+      - "2123:2123/udp"
+      # S1AP (SCTP)
+      - "36412:36412/sctp"
+      # Diameter S6a (UDP)
+      - "3868:3868/udp"
+      # CLI management (TCP)
+      - "5555:5555/tcp"
+    
+    volumes:
+      # Configuration directory
+      - ./config:/etc/vepc
+      # Logs directory
+      - vepc-logs:/var/log/vepc
+      # Optional: share network namespace for host interface access
+      # - /etc/sysctl.conf:/etc/sysctl.conf:ro
+    
+    environment:
+      # Set to 'debug' for verbose logging
+      - LOG_LEVEL=info
+      - CONFIG_PATH=/etc/vepc
+      - LOG_PATH=/var/log/vepc
+    
+    # Keep container running
+    stdin_open: true
+    tty: true
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "/app/vepc-cli", "status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "vepc=core"
+
+volumes:
+  vepc-logs:
+    driver: local
+
+networks:
+  default:
+    name: vepc-network
+    driver: bridge

@@ -1,0 +1,42 @@
+[Unit]
+Description=vEPC - Evolved Packet Core Emulator
+After=docker.service
+Requires=docker.service
+Documentation=https://github.com/your-org/vEPC
+
+[Service]
+Type=exec
+User={{ vepc_user }}
+Group={{ vepc_group }}
+WorkingDirectory={{ vepc_repo_path }}
+
+# Start the container using docker-compose
+ExecStart=/usr/bin/docker-compose -f {{ vepc_repo_path }}/docker-compose.yml up
+
+# Stop the container
+ExecStop=/usr/bin/docker-compose -f {{ vepc_repo_path }}/docker-compose.yml down
+
+# Restart policy
+Restart=on-failure
+RestartSec=10
+
+# Resource limits
+MemoryLimit=2G
+CPUQuota=80%
+
+# Network configuration
+Network=host
+
+# Security settings
+PrivateTmp=yes
+NoNewPrivileges=no
+ProtectSystem=false
+ProtectHome=no
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=vepc
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,165 @@
+================================================================================
+                   vEPC Deployment Information
+================================================================================
+Deployment Date: {{ ansible_date_time.iso8601 }}
+Deployed by: {{ ansible_user_id }}
+Hostname: {{ ansible_hostname }}
+Distribution: {{ ansible_distribution }} {{ ansible_distribution_version }}
+Kernel: {{ ansible_kernel }}
+
+================================================================================
+                        DEPLOYMENT PATHS
+================================================================================
+Repository Path: {{ vepc_repo_path }}
+Configuration Path: {{ config_path }}
+Logging Path: {{ log_path }}
+Build Path: {{ vepc_repo_path }}/build
+
+Repository Details:
+  URL: {{ vepc_repo_url }}
+  Branch: {{ vepc_repo_branch }}
+
+================================================================================
+                     CONTAINER INFORMATION
+================================================================================
+Container Name: {{ vepc_container_name }}
+Docker Image: {{ vepc_docker_image }}
+Registry: {{ docker_registry }}
+
+================================================================================
+                    NETWORK CONFIGURATION
+================================================================================
+MCC: {{ mcc }}
+MNC: {{ mnc }}
+
+Service Ports:
+  GTP-C Signaling: 0.0.0.0:{{ gtp_c_port }}/udp
+  S1AP Signaling: 0.0.0.0:{{ s1ap_port }}/sctp
+  Diameter S6a: 0.0.0.0:{{ diameter_port }}/udp
+  CLI Management: localhost:{{ cli_port }}/tcp
+
+Firewall Rules:
+  - Allow UDP port {{ gtp_c_port }} (GTP-C)
+  - Allow SCTP port {{ s1ap_port }} (S1AP)
+  - Allow UDP port {{ diameter_port }} (Diameter)
+  - Allow TCP port {{ cli_port }} (CLI)
+
+================================================================================
+                      SYSTEM RESOURCES
+================================================================================
+CPU Cores: {{ ansible_processor_vcpus }}
+Total Memory: {{ ansible_memtotal_mb }} MB
+Disk Space: {{ ansible_mounts[0].size_gb | round(2) }} GB
+
+================================================================================
+                        QUICK COMMANDS
+================================================================================
+
+View container status:
+  sudo docker ps -a | grep {{ vepc_container_name }}
+
+View container logs (follow):
+  docker logs -f {{ vepc_container_name }}
+
+Access CLI:
+  docker exec -it {{ vepc_container_name }} /app/vepc-cli
+
+Show system status:
+  docker exec {{ vepc_container_name }} /app/vepc-cli status
+
+Show interface status:
+  docker exec {{ vepc_container_name }} /app/vepc-cli show interface
+
+Show configuration:
+  docker exec {{ vepc_container_name }} /app/vepc-cli show config
+
+View system logs:
+  docker exec {{ vepc_container_name }} /app/vepc-cli log
+
+Restart service:
+  sudo systemctl restart vepc
+
+Stop service:
+  sudo systemctl stop vepc
+
+Start service:
+  sudo systemctl start vepc
+
+View systemd logs:
+  journalctl -u vepc -f
+
+================================================================================
+                    CONFIGURATION FILES
+================================================================================
+
+Main Configuration:
+  {{ config_path }}/vepc.config
+
+Interface Configuration:
+  {{ config_path }}/interfaces.conf
+
+MME Configuration:
+  {{ config_path }}/vmme.conf
+
+SGSN Configuration:
+  {{ config_path }}/vsgsn.conf
+
+================================================================================
+                       HEALTH CHECK
+================================================================================
+
+Service Health: RUNNING
+Container Status: {{ container_info.container['State']['Status'] | default('N/A') }}
+
+Health Check Command:
+  docker healthcheck inspect {{ vepc_container_name }}
+
+Manual Health Verification:
+  docker exec {{ vepc_container_name }} /app/vepc-cli status
+
+================================================================================
+                      TROUBLESHOOTING
+================================================================================
+
+If the container fails to start:
+1. Check Docker daemon status:
+   sudo systemctl status docker
+
+2. View detailed logs:
+   docker logs {{ vepc_container_name }}
+
+3. Verify configuration files:
+   ls -la {{ config_path }}/
+
+4. Check network connectivity:
+   docker exec {{ vepc_container_name }} ip addr show
+
+5. Verify port binding:
+   netstat -tlnup | grep -E '{{ gtp_c_port }}|{{ s1ap_port }}|{{ diameter_port }}|{{ cli_port }}'
+
+================================================================================
+                      SECURITY NOTES
+================================================================================
+
+- vEPC service runs under user: {{ vepc_user }} (UID: {{ vepc_uid }})
+- Container capabilities: SYS_ADMIN, NET_ADMIN, SYS_PTRACE
+- Network mode: Bridge
+- IP forwarding: Enabled
+- Firewall: Configured with UFW
+
+For production deployment:
+- Review and adjust firewall rules
+- Implement proper network isolation
+- Enable audit logging
+- Use SSH keys instead of passwords
+- Implement monitoring and alerting
+
+================================================================================
+                    SUPPORT & DOCUMENTATION
+================================================================================
+
+Project Repository: {{ vepc_repo_url }}
+Configuration Documentation: {{ vepc_repo_path }}/documentation/
+Issue Reporting: {{ vepc_repo_url }}/issues
+
+================================================================================

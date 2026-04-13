@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  vepc:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        REPO_URL: {{ vepc_repo_url }}
+        REPO_BRANCH: {{ vepc_repo_branch }}
+    
+    container_name: {{ vepc_container_name }}
+    hostname: vepc
+    
+    cap_add:
+      - SYS_ADMIN
+      - NET_ADMIN
+      - SYS_PTRACE
+    
+    ports:
+      - "{{ gtp_c_port | default('2123') }}:{{ gtp_c_port | default('2123') }}/udp"
+      - "{{ s1ap_port | default('36412') }}:{{ s1ap_port | default('36412') }}/sctp"
+      - "{{ diameter_port | default('3868') }}:{{ diameter_port | default('3868') }}/udp"
+      - "{{ cli_port | default('5555') }}:{{ cli_port | default('5555') }}/tcp"
+    
+    volumes:
+      - {{ config_path }}:/etc/vepc
+      - vepc-logs:{{ log_path }}
+      - /var/lib/vepc:/var/lib/vepc
+    
+    environment:
+      LOG_LEVEL: {{ log_level | default('info') }}
+      CONFIG_PATH: /etc/vepc
+      LOG_PATH: {{ log_path }}
+      MCC: {{ mcc | default('250') }}
+      MNC: {{ mnc | default('20') }}
+    
+    stdin_open: true
+    tty: true
+    
+    restart: unless-stopped
+    
+    healthcheck:
+      test: ["CMD", "/app/vepc-cli", "status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "vepc=core"
+    
+    networks:
+      - vepc-network
+
+volumes:
+  vepc-logs:
+    driver: local
+
+networks:
+  vepc-network:
+    name: vepc-network
+    driver: bridge

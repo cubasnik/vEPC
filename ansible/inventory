@@ -1,0 +1,37 @@
+# Ansible Inventory for vEPC Deployment
+# Usage: ansible-playbook -i ansible/inventory vepc-deploy.yml
+
+[vepc_hosts]
+# Define your target hosts here
+# Examples:
+# vepc-prod ansible_host=192.168.1.100 ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/id_rsa
+# vepc-test ansible_host=192.168.1.101 ansible_user=ubuntu
+
+# Localhost deployment (for testing)
+localhost ansible_connection=local ansible_become_password_file=/tmp/sudo_pass
+
+[vepc_hosts:vars]
+# Repository settings
+vepc_repo_url=https://github.com/your-org/vEPC.git
+vepc_repo_branch=main
+
+# Network settings
+mcc=250
+mnc=20
+gtp_c_port=2123
+s1ap_port=36412
+diameter_port=3868
+cli_port=5555
+
+# User settings
+ansible_user=ubuntu
+ansible_become=yes
+ansible_become_method=sudo
+
+# Docker settings
+docker_registry=docker.io
+
+# Paths
+vepc_repo_path=/opt/vepc
+config_path=/etc/vepc
+log_path=/var/log/vepc
