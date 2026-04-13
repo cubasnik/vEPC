@@ -415,7 +415,7 @@
           PermitTunnel no
           PrintMotd no
           Subsystem sftp internal-sftp
-          ForceCommand docker exec -it {{ vepc_container_name }} /app/vepc-cli
+            ForceCommand docker compose -f {{ vepc_repo_path }}/docker-compose.yml exec vepc /app/vepc-cli
       when: ssh_cli_enabled | bool
 
     - name: Validate dedicated CLI sshd configuration
