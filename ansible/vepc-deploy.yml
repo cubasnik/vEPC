@@ -54,6 +54,18 @@
           - ansible_distribution_version is version('22.04', '>=')
         fail_msg: "This playbook requires Ubuntu 22.04 LTS or higher"
 
+    - name: Pre-clean Docker apt source files before apt tasks
+      shell: |
+        rm -f /etc/apt/sources.list.d/docker.sources
+        rm -f /etc/apt/sources.list.d/docker.list
+        for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+          [ -f "$f" ] || continue
+          sed -i '/download\.docker\.com\/linux\/ubuntu/d' "$f"
+        done
+      args:
+        executable: /bin/bash
+      changed_when: false
+
   tasks:
     # ==================== System Preparation ====================
     - name: Update apt cache
