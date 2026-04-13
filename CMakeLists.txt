@@ -21,6 +21,18 @@ add_executable(vepc-cli
     cli/cli_server.h
 )
 
+if(UNIX)
+    find_library(READLINE_LIB readline)
+    find_path(READLINE_INCLUDE readline/readline.h)
+    if(READLINE_LIB AND READLINE_INCLUDE)
+        message(STATUS "Readline found: ${READLINE_LIB} — enabling Tab completion")
+        target_compile_definitions(vepc-cli PRIVATE VEPC_USE_READLINE)
+        target_link_libraries(vepc-cli ${READLINE_LIB})
+    else()
+        message(WARNING "Readline not found — Tab completion disabled")
+    endif()
+endif()
+
 add_executable(test-gtp-parser
     tests/test_gtp_parser.cpp
     src/gtp_parser.cpp
@@ -253,6 +265,20 @@ set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 target_link_libraries(vepc Threads::Threads)
 target_link_libraries(vepc-cli Threads::Threads)
+
+if (NOT WIN32)
+    find_package(Curses)
+    find_path(READLINE_INCLUDE_DIR readline/readline.h)
+    find_library(READLINE_LIBRARY NAMES readline)
+    if (READLINE_INCLUDE_DIR AND READLINE_LIBRARY)
+        target_include_directories(vepc-cli PRIVATE ${READLINE_INCLUDE_DIR})
+        target_link_libraries(vepc-cli ${READLINE_LIBRARY})
+        if (CURSES_FOUND)
+            target_link_libraries(vepc-cli ${CURSES_LIBRARIES})
+        endif()
+        target_compile_definitions(vepc-cli PRIVATE VEPC_USE_READLINE=1)
+    endif()
+endif()
 
 # Windows: линковка с Winsock2
 if (WIN32)
