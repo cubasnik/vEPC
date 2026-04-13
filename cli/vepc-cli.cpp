@@ -9,6 +9,7 @@
 #include <map>
 #include <cctype>
 #include <thread>
+#include <set>
 
 // Глобальная карта: номер в таблице -> индекс в g_ifaces
 std::map<int, size_t> iface_num_to_idx;
@@ -18,6 +19,11 @@ std::map<int, size_t> iface_num_to_idx;
 #include <sys/un.h>
 #include <unistd.h>
 #include <cstdio>
+#include <termios.h>
+#ifdef VEPC_USE_READLINE
+#include <readline/history.h>
+#include <readline/readline.h>
+#endif
 #include "linux_interface.h"
 #else
 #define _WINSOCK_DEPRECATED_NO_WARNINGS
@@ -92,12 +98,6 @@ static constexpr int IFACE_COL_ADDR = 21;
 static constexpr int IFACE_COL_ADMIN = 6;
 static constexpr int IFACE_COL_OPER = 9;
 static constexpr int IFACE_COL_IMPL = 8;
-
-static std::string trim(const std::string& s) {
-    size_t b = s.find_first_not_of(" \t\r\n");
-    size_t e = s.find_last_not_of(" \t\r\n");
-    return (b == std::string::npos) ? "" : s.substr(b, e - b + 1);
-}
 
 static bool startsWith(const std::string& value, const std::string& prefix) {
     return value.rfind(prefix, 0) == 0;
@@ -1421,6 +1421,284 @@ static std::vector<std::string> splitTokens(const std::string& line) {
     return tokens;
 }
 
+#ifndef _WIN32
+static void redrawInteractiveLine(const std::string& prompt, const std::string& line) {
+    std::cout << "\r\033[2K";
+    printPrompt(prompt);
+    std::cout << line;
+    std::cout.flush();
+}
+
+static bool startsWithCaseInsensitive(const std::string& value, const std::string& prefix) {
+    if (prefix.size() > value.size()) {
+        return false;
+    }
+    for (size_t i = 0; i < prefix.size(); ++i) {
+        const char a = static_cast<char>(std::tolower(static_cast<unsigned char>(value[i])));
+        const char b = static_cast<char>(std::tolower(static_cast<unsigned char>(prefix[i])));
+        if (a != b) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static std::vector<std::string> firstWordCommandsForMode(CliMode mode) {
+    std::vector<std::string> out = {
+        "show", "status", "state", "restart", "stop", "help", "exit", "quit", "set", "save", "write"
+    };
+
+    if (mode == CliMode::Exec) {
+        out.push_back("configure");
+        out.push_back("conf");
+    }
+    if (mode == CliMode::Config) {
+        out.push_back("interface");
+        out.push_back("int");
+        out.push_back("commit");
+        out.push_back("end");
+    }
+    if (mode == CliMode::InterfaceConfig) {
+        out.push_back("shutdown");
+        out.push_back("no");
+        out.push_back("default");
+        out.push_back("end");
+    }
+
+#ifndef _WIN32
+    if (mode == CliMode::Exec || mode == CliMode::Config) {
+        out.push_back("create-vlan");
+        out.push_back("delete-interface");
+        out.push_back("up-interface");
+        out.push_back("down-interface");
+        out.push_back("set-ip");
+        out.push_back("list-interfaces");
+    }
+#endif
+
+    return out;
+}
+
+static std::vector<std::string> completionCandidates(
+    CliMode mode,
+    const std::string& currentLine,
+    const std::string& selectedInterface
+) {
+    std::vector<std::string> candidates;
+    std::vector<std::string> tokens = splitTokens(currentLine);
+    const bool endsWithSpace = !currentLine.empty() && std::isspace(static_cast<unsigned char>(currentLine.back()));
+
+    int tokenIndex = endsWithSpace ? static_cast<int>(tokens.size()) : static_cast<int>(tokens.size()) - 1;
+    std::string prefix;
+    if (!endsWithSpace && !tokens.empty()) {
+        prefix = tokens.back();
+    }
+
+    const std::string t0 = tokens.size() > 0 ? toLowerCopy(tokens[0]) : "";
+    const std::string t1 = tokens.size() > 1 ? toLowerCopy(tokens[1]) : "";
+
+    if (tokenIndex <= 0) {
+        candidates = firstWordCommandsForMode(mode);
+    } else if (t0 == "show" && tokenIndex == 1) {
+        candidates = {"running-config", "logging", "log", "interface", "iface", "config"};
+    } else if ((t0 == "show") && (t1 == "interface" || t1 == "iface") && tokenIndex == 2) {
+        for (const auto& iface : g_ifaces) {
+            candidates.push_back(iface.name);
+        }
+    } else if ((t0 == "interface" || t0 == "int") && tokenIndex == 1) {
+        for (const auto& iface : g_ifaces) {
+            candidates.push_back(iface.name);
+        }
+    } else if (mode == CliMode::InterfaceConfig && t0 == "no" && tokenIndex == 1) {
+        candidates = {"shutdown"};
+    } else if (mode == CliMode::Config && t0 == "configure" && tokenIndex == 1) {
+        candidates = {"terminal"};
+    }
+
+    if (!selectedInterface.empty() && (t0 == "show") && (t1 == "interface" || t1 == "iface") && tokenIndex == 2) {
+        candidates.push_back(selectedInterface);
+    }
+
+    std::set<std::string> dedup;
+    std::vector<std::string> filtered;
+    for (const auto& candidate : candidates) {
+        if (!startsWithCaseInsensitive(candidate, prefix)) {
+            continue;
+        }
+        if (dedup.insert(candidate).second) {
+            filtered.push_back(candidate);
+        }
+    }
+    return filtered;
+}
+
+#ifdef VEPC_USE_READLINE
+static CliMode g_readlineMode = CliMode::Exec;
+static std::string g_readlineSelectedInterface;
+static std::vector<std::string> g_readlineMatches;
+
+static char* vepcReadlineGenerator(const char* text, int state) {
+    static size_t index = 0;
+    if (state == 0) {
+        index = 0;
+    }
+
+    while (index < g_readlineMatches.size()) {
+        const std::string& candidate = g_readlineMatches[index++];
+        if (startsWithCaseInsensitive(candidate, text == nullptr ? "" : text)) {
+            char* result = static_cast<char*>(std::malloc(candidate.size() + 1));
+            if (!result) {
+                return nullptr;
+            }
+            std::memcpy(result, candidate.c_str(), candidate.size() + 1);
+            return result;
+        }
+    }
+    return nullptr;
+}
+
+static char** vepcReadlineCompletion(const char* text, int start, int end) {
+    (void)start;
+    (void)end;
+    g_readlineMatches = completionCandidates(g_readlineMode, rl_line_buffer ? rl_line_buffer : "", g_readlineSelectedInterface);
+    if (g_readlineMatches.empty()) {
+        return nullptr;
+    }
+
+    rl_attempted_completion_over = 1;
+    return rl_completion_matches(text, vepcReadlineGenerator);
+}
+#endif
+
+static bool readInteractiveLineLinux(
+    const std::string& prompt,
+    CliMode mode,
+    const std::string& selectedInterface,
+    std::string& outLine
+) {
+#ifdef VEPC_USE_READLINE
+    g_readlineMode = mode;
+    g_readlineSelectedInterface = selectedInterface;
+    rl_readline_name = const_cast<char*>("vepc-cli");
+    rl_attempted_completion_function = vepcReadlineCompletion;
+    rl_basic_word_break_characters = const_cast<char*>(" \t\n");
+    rl_completion_append_character = ' ';
+    rl_bind_key('\t', rl_complete);
+
+    char* buffer = readline(prompt.c_str());
+    if (buffer == nullptr) {
+        outLine.clear();
+        return false;
+    }
+
+    outLine = buffer;
+    if (!outLine.empty()) {
+        add_history(buffer);
+    }
+    std::free(buffer);
+    return true;
+#else
+    outLine.clear();
+
+    termios original{};
+    if (tcgetattr(STDIN_FILENO, &original) != 0) {
+        return static_cast<bool>(std::getline(std::cin, outLine));
+    }
+
+    termios raw = original;
+    raw.c_lflag &= static_cast<unsigned long>(~(ICANON | ECHO));
+    raw.c_cc[VMIN] = 1;
+    raw.c_cc[VTIME] = 0;
+
+    if (tcsetattr(STDIN_FILENO, TCSANOW, &raw) != 0) {
+        return static_cast<bool>(std::getline(std::cin, outLine));
+    }
+
+    auto restore = [&]() {
+        tcsetattr(STDIN_FILENO, TCSANOW, &original);
+    };
+
+    while (true) {
+        char ch = 0;
+        const ssize_t r = read(STDIN_FILENO, &ch, 1);
+        if (r <= 0) {
+            restore();
+            return false;
+        }
+
+        if (ch == '\n' || ch == '\r') {
+            std::cout << "\n";
+            restore();
+            return true;
+        }
+
+        if (ch == 4) { // Ctrl+D
+            if (outLine.empty()) {
+                restore();
+                return false;
+            }
+            continue;
+        }
+
+        if (ch == 3) { // Ctrl+C
+            std::cout << "^C\n";
+            outLine.clear();
+            restore();
+            return true;
+        }
+
+        if (ch == '\t') {
+            const std::vector<std::string> matches = completionCandidates(mode, outLine, selectedInterface);
+            if (matches.empty()) {
+                continue;
+            }
+
+            std::vector<std::string> tokens = splitTokens(outLine);
+            const bool endsWithSpace = !outLine.empty() && std::isspace(static_cast<unsigned char>(outLine.back()));
+            if (matches.size() == 1) {
+                if (endsWithSpace) {
+                    outLine += matches[0] + " ";
+                } else if (!tokens.empty()) {
+                    const std::string prefix = tokens.back();
+                    outLine += matches[0].substr(prefix.size()) + " ";
+                }
+                redrawInteractiveLine(prompt, outLine);
+            } else {
+                std::cout << "\n";
+                for (const auto& m : matches) {
+                    std::cout << m << "  ";
+                }
+                std::cout << "\n";
+                redrawInteractiveLine(prompt, outLine);
+            }
+            continue;
+        }
+
+        if (ch == 127 || ch == 8) {
+            if (!outLine.empty()) {
+                outLine.pop_back();
+                redrawInteractiveLine(prompt, outLine);
+            }
+            continue;
+        }
+
+        if (ch == 27) { // Escape sequences (arrows, etc.)
+            char seq[2] = {0, 0};
+            read(STDIN_FILENO, &seq[0], 1);
+            read(STDIN_FILENO, &seq[1], 1);
+            continue;
+        }
+
+        if (std::isprint(static_cast<unsigned char>(ch)) || ch == ' ') {
+            outLine.push_back(ch);
+            std::cout << ch;
+            std::cout.flush();
+        }
+    }
+#endif
+}
+#endif
+
 static std::string promptForMode(CliMode mode, const std::string& ifaceName = "") {
     if (mode == CliMode::Config) {
         return "vepc(config)# ";
@@ -1513,7 +1791,7 @@ static bool isSetCommand(const std::vector<std::string>& tokens) {
     return tokens.size() >= 3 && toLowerCopy(tokens[0]) == "set";
 }
 
-static bool isInterfaceCommand(const std::vector<std::string>& tokens) {
+static bool isInterfaceEnterCommand(const std::vector<std::string>& tokens) {
     if (tokens.size() != 2) {
         return false;
     }
@@ -1576,9 +1854,22 @@ int main() {
     };
     CliMode mode = CliMode::Exec;
     std::string selectedInterface;
+    if (interactiveSession) {
+        printPrompt(promptForMode(mode, selectedInterface));
+    }
     while (true) {
         std::string line;
+#ifndef _WIN32
+        if (interactiveSession) {
+            if (!readInteractiveLineLinux(promptForMode(mode, selectedInterface), mode, selectedInterface, line)) {
+                break;
+            }
+        } else {
+            if (!std::getline(std::cin, line)) break;
+        }
+#else
         if (!std::getline(std::cin, line)) break;
+#endif
         line = trim(line);
         if (line.empty()) { printPrompt(promptForMode(mode, selectedInterface)); continue; }
         const std::vector<std::string> tokens = splitTokens(line);
@@ -1717,7 +2008,7 @@ int main() {
         }
 #endif
 
-        if (mode == CliMode::Config && isInterfaceCommand(tokens)) {
+        if (mode == CliMode::Config && isInterfaceEnterCommand(tokens)) {
             const int idx = resolveIface(tokens[1]);
             if (idx >= 0) {
                 selectedInterface = g_ifaces[idx].name;
