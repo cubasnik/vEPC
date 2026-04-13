@@ -47,9 +47,9 @@ Firewall Rules:
 ================================================================================
                       SYSTEM RESOURCES
 ================================================================================
-CPU Cores: {{ ansible_processor_vcpus }}
-Total Memory: {{ ansible_memtotal_mb }} MB
-Disk Space: {{ ansible_mounts[0].size_gb | round(2) }} GB
+CPU Cores: {{ ansible_processor_vcpus | default('N/A') }}
+Total Memory: {{ ansible_memtotal_mb | default('N/A') }} MB
+Disk Space: {{ ((ansible_mounts | default([]) | first).size_total | default(0) | float / 1073741824) | round(2) }} GB
 
 ================================================================================
                         QUICK COMMANDS
@@ -109,7 +109,7 @@ SGSN Configuration:
 ================================================================================
 
 Service Health: RUNNING
-Container Status: {{ container_info.container['State']['Status'] | default('N/A') }}
+Container Status: {{ container_info.container['State']['Status'] | default('N/A') if (container_info is defined and container_info.container is defined) else 'N/A' }}
 
 Health Check Command:
   docker healthcheck inspect {{ vepc_container_name }}
@@ -141,7 +141,7 @@ If the container fails to start:
                       SECURITY NOTES
 ================================================================================
 
-- vEPC service runs under user: {{ vepc_user }} (UID: {{ vepc_uid }})
+- vEPC service runs under user: {{ vepc_user }}
 - Container capabilities: SYS_ADMIN, NET_ADMIN, SYS_PTRACE
 - Network mode: Bridge
 - IP forwarding: Enabled
