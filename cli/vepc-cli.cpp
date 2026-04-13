@@ -8,6 +8,7 @@
 #include <chrono>
 #include <map>
 #include <cctype>
+#include <cstdint>
 #include <thread>
 #include <set>
 
@@ -969,6 +970,27 @@ static void loadInterfaces() {
     }
 }
 
+static bool saveInterfaces() {
+    std::ofstream out(INTERFACES_CONF, std::ios::trunc);
+    if (!out.is_open()) {
+        const std::string alt = std::string("../") + INTERFACES_CONF;
+        out.open(alt, std::ios::trunc);
+        if (!out.is_open()) {
+            return false;
+        }
+    }
+
+    out << "# Name      | Protocol | IP:Port        | RemoteNE\n";
+    for (const auto& iface : g_ifaces) {
+        out << iface.name << " | " << iface.proto << " | " << iface.ip;
+        if (!iface.port.empty()) {
+            out << ":" << iface.port;
+        }
+        out << " | " << iface.peer << "\n";
+    }
+    return true;
+}
+
 static void printIfaceTableCustom(const std::vector<size_t>& idxs, int& num) {
     const int wN = 3, wI = 12, wP = 8, wIP = 14, wPort = 6, wR = 16;
     auto hline = [&]() {
@@ -1399,7 +1421,7 @@ static void printInterfaceHelp(const std::string& ifaceName) {
     printSectionTitle("INTERFACE MODE", 72);
     printKeyValueTable({
         {"Interface", ifaceName.empty() ? "interface <name>" : ifaceName},
-        {"Actions", "shutdown | no shutdown | default"},
+        {"Actions", "shutdown | no shutdown | default | ip address <ip[/prefix]> | ip address <ip> <mask> | bind <linux-iface>"},
         {"Show", ifaceName.empty() ? "show interface <name> [detail]" : "show interface " + ifaceName + " [detail]"},
         {"Navigation", "exit | end"},
         {"Help", "help | ?"}
@@ -1469,6 +1491,8 @@ static std::vector<std::string> firstWordCommandsForMode(CliMode mode) {
     if (mode == CliMode::InterfaceConfig) {
         out.push_back("shutdown");
         out.push_back("no");
+        out.push_back("ip");
+        out.push_back("bind");
         out.push_back("default");
         out.push_back("end");
     }
@@ -1518,7 +1542,16 @@ static std::vector<std::string> completionCandidates(
             candidates.push_back(iface.name);
         }
     } else if (mode == CliMode::InterfaceConfig && t0 == "no" && tokenIndex == 1) {
-        candidates = {"shutdown"};
+        candidates = {"shutdown", "ip"};
+    } else if (mode == CliMode::InterfaceConfig && t0 == "no" && t1 == "ip" && tokenIndex == 2) {
+        candidates = {"address"};
+    } else if (mode == CliMode::InterfaceConfig && t0 == "ip" && tokenIndex == 1) {
+        candidates = {"address"};
+    } else if (mode == CliMode::InterfaceConfig && t0 == "bind" && tokenIndex == 1) {
+        const auto systemIfaces = listAllInterfaces();
+        for (const auto& iface : systemIfaces) {
+            candidates.push_back(iface);
+        }
     } else if (mode == CliMode::Config && t0 == "configure" && tokenIndex == 1) {
         candidates = {"terminal"};
     }
@@ -1852,7 +1885,7 @@ static bool isHelpCommand(const std::vector<std::string>& tokens) {
 }
 
 static void printModeHint() {
-    printLocalInfo("Structured mode commands: configure terminal | interface <name> | hostname <name> | shutdown | no shutdown | end");
+    printLocalInfo("Structured mode commands: configure terminal | interface <name> | hostname <name> | shutdown | no shutdown | ip address <ip[/prefix]> | bind <linux-iface> | end");
     printLocalInfo("Cisco-style commands: show [running-config | interface | status | logging | about] | about");
 #ifndef _WIN32
     printLocalInfo("Linux interface commands: create-vlan <parent> <vlan-id> | delete-interface <name>");
@@ -1879,6 +1912,14 @@ static int resolveIface(const std::string& token) {
 }
 
 static const char* SYS_CMDS[] = { "", "status", "logs", "state", "show", "stop" };
+
+static int dottedMaskToPrefix(const std::string& mask);
+static bool parseIpv4Token(const std::string& value);
+static bool parseIpv4WithOptionalPrefix(const std::string& token, std::string& ipOut, int& prefixOut);
+static bool parseVirtualIpCommandValue(const std::vector<std::string>& tokens, std::string& ipOut, int& prefixOut);
+static bool isSafeLinuxInterfaceName(const std::string& value);
+static std::string bindIpKeyForInterfaceName(const std::string& ifaceName);
+static std::string bindInterfaceKeyForInterfaceName(const std::string& ifaceName);
 
 int main() {
     loadInterfaces();
@@ -2128,6 +2169,111 @@ int main() {
                 printPrompt(promptForMode(mode, selectedInterface));
                 continue;
             }
+            if (head == "ip" && tokens.size() >= 2 && toLowerCopy(tokens[1]) == "address") {
+                std::string virtualIp;
+                int prefix = 32;
+                if (!parseVirtualIpCommandValue(tokens, virtualIp, prefix)) {
+                    printLocalError("Usage: ip address <ip[/prefix]> OR ip address <ip> <netmask>");
+                    printPrompt(promptForMode(mode, selectedInterface));
+                    continue;
+                }
+
+                const int idx = resolveIface(selectedInterface);
+                if (idx < 0) {
+                    printLocalError("Unknown interface context: " + selectedInterface);
+                    printPrompt(promptForMode(mode, selectedInterface));
+                    continue;
+                }
+
+                g_ifaces[idx].ip = virtualIp;
+                if (!saveInterfaces()) {
+                    printLocalError("Failed to persist interface virtual IP to " INTERFACES_CONF);
+                } else {
+                    printLocalInfo("Virtual IP for " + selectedInterface + " set to " + virtualIp + "/" + std::to_string(prefix));
+                }
+
+                const std::string bindIpKey = bindIpKeyForInterfaceName(selectedInterface);
+                if (!bindIpKey.empty()) {
+                    sendToServer("set " + bindIpKey + " " + virtualIp);
+                } else {
+                    printLocalWarning("No runtime bind key mapping for interface " + selectedInterface + "; only interfaces.conf updated.");
+                }
+
+                printPrompt(promptForMode(mode, selectedInterface));
+                continue;
+            }
+            if (tokens.size() == 3 && head == "no" && toLowerCopy(tokens[1]) == "ip" && toLowerCopy(tokens[2]) == "address") {
+                const int idx = resolveIface(selectedInterface);
+                if (idx < 0) {
+                    printLocalError("Unknown interface context: " + selectedInterface);
+                    printPrompt(promptForMode(mode, selectedInterface));
+                    continue;
+                }
+
+                g_ifaces[idx].ip = "0.0.0.0";
+                if (!saveInterfaces()) {
+                    printLocalError("Failed to persist interface IP reset to " INTERFACES_CONF);
+                } else {
+                    printLocalInfo("Virtual IP for " + selectedInterface + " reset to 0.0.0.0");
+                }
+
+                const std::string bindIpKey = bindIpKeyForInterfaceName(selectedInterface);
+                if (!bindIpKey.empty()) {
+                    sendToServer("set " + bindIpKey + " 0.0.0.0");
+                }
+
+                printPrompt(promptForMode(mode, selectedInterface));
+                continue;
+            }
+            if (head == "bind") {
+                if (tokens.size() != 2 || !isSafeLinuxInterfaceName(tokens[1])) {
+                    printLocalError("Usage: bind <linux-interface>");
+                    printPrompt(promptForMode(mode, selectedInterface));
+                    continue;
+                }
+
+                const int idx = resolveIface(selectedInterface);
+                if (idx < 0) {
+                    printLocalError("Unknown interface context: " + selectedInterface);
+                    printPrompt(promptForMode(mode, selectedInterface));
+                    continue;
+                }
+
+                std::string virtualIp = g_ifaces[idx].ip;
+                int prefix = 32;
+                std::string ipOnly;
+                int parsedPrefix = 32;
+                if (parseIpv4WithOptionalPrefix(virtualIp, ipOnly, parsedPrefix)) {
+                    virtualIp = ipOnly;
+                    prefix = parsedPrefix;
+                }
+                if (!parseIpv4Token(virtualIp)) {
+                    printLocalError("Set virtual IP first: ip address <ip[/prefix]>");
+                    printPrompt(promptForMode(mode, selectedInterface));
+                    continue;
+                }
+
+#ifndef _WIN32
+                if (!setInterfaceIp(tokens[1], virtualIp + "/" + std::to_string(prefix))) {
+                    printLocalError("Failed to assign virtual IP to Linux interface " + tokens[1]);
+                    printPrompt(promptForMode(mode, selectedInterface));
+                    continue;
+                }
+#endif
+
+                const std::string bindIpKey = bindIpKeyForInterfaceName(selectedInterface);
+                if (!bindIpKey.empty()) {
+                    sendToServer("set " + bindIpKey + " " + virtualIp);
+                }
+                const std::string bindIfaceKey = bindInterfaceKeyForInterfaceName(selectedInterface);
+                if (!bindIfaceKey.empty()) {
+                    sendToServer("set " + bindIfaceKey + " " + tokens[1]);
+                }
+
+                printLocalInfo("Bound " + selectedInterface + " to Linux interface " + tokens[1] + " using virtual IP " + virtualIp + "/" + std::to_string(prefix));
+                printPrompt(promptForMode(mode, selectedInterface));
+                continue;
+            }
             if (head == "default") {
                 sendToServer("iface_reset " + selectedInterface);
                 printPrompt(promptForMode(mode, selectedInterface));
@@ -2182,4 +2328,176 @@ int main() {
     }
     std::cout << "\n" << BOLD << MAG << "Exiting vEPC CLI" << RST << "\n";
     return 0;
+}
+
+static int dottedMaskToPrefix(const std::string& mask) {
+    std::istringstream ss(mask);
+    std::string part;
+    int octets[4] = {0, 0, 0, 0};
+    int idx = 0;
+    while (std::getline(ss, part, '.')) {
+        if (idx >= 4 || part.empty()) {
+            return -1;
+        }
+        for (char ch : part) {
+            if (!std::isdigit(static_cast<unsigned char>(ch))) {
+                return -1;
+            }
+        }
+        int value = 0;
+        try {
+            value = std::stoi(part);
+        } catch (...) {
+            return -1;
+        }
+        if (value < 0 || value > 255) {
+            return -1;
+        }
+        octets[idx++] = value;
+    }
+    if (idx != 4) {
+        return -1;
+    }
+
+    uint32_t maskValue = 0;
+    for (int i = 0; i < 4; ++i) {
+        maskValue = (maskValue << 8) | static_cast<uint32_t>(octets[i]);
+    }
+
+    int prefix = 0;
+    bool seenZero = false;
+    for (int bit = 31; bit >= 0; --bit) {
+        const bool one = ((maskValue >> bit) & 1u) != 0;
+        if (one) {
+            if (seenZero) {
+                return -1;
+            }
+            ++prefix;
+        } else {
+            seenZero = true;
+        }
+    }
+    return prefix;
+}
+
+static bool parseIpv4Token(const std::string& value) {
+    std::istringstream ss(value);
+    std::string part;
+    int octetCount = 0;
+    while (std::getline(ss, part, '.')) {
+        if (part.empty() || part.size() > 3) {
+            return false;
+        }
+        for (char ch : part) {
+            if (!std::isdigit(static_cast<unsigned char>(ch))) {
+                return false;
+            }
+        }
+        int n = 0;
+        try {
+            n = std::stoi(part);
+        } catch (...) {
+            return false;
+        }
+        if (n < 0 || n > 255) {
+            return false;
+        }
+        ++octetCount;
+    }
+    return octetCount == 4;
+}
+
+static bool parseIpv4WithOptionalPrefix(const std::string& token, std::string& ipOut, int& prefixOut) {
+    const size_t slash = token.find('/');
+    if (slash == std::string::npos) {
+        if (!parseIpv4Token(token)) {
+            return false;
+        }
+        ipOut = token;
+        prefixOut = 32;
+        return true;
+    }
+
+    const std::string ipPart = token.substr(0, slash);
+    const std::string prefixPart = token.substr(slash + 1);
+    if (!parseIpv4Token(ipPart) || prefixPart.empty()) {
+        return false;
+    }
+    for (char ch : prefixPart) {
+        if (!std::isdigit(static_cast<unsigned char>(ch))) {
+            return false;
+        }
+    }
+    int prefix = -1;
+    try {
+        prefix = std::stoi(prefixPart);
+    } catch (...) {
+        return false;
+    }
+    if (prefix < 0 || prefix > 32) {
+        return false;
+    }
+    ipOut = ipPart;
+    prefixOut = prefix;
+    return true;
+}
+
+static bool parseVirtualIpCommandValue(const std::vector<std::string>& tokens, std::string& ipOut, int& prefixOut) {
+    if (tokens.size() == 3) {
+        return parseIpv4WithOptionalPrefix(tokens[2], ipOut, prefixOut);
+    }
+    if (tokens.size() == 4) {
+        if (!parseIpv4Token(tokens[2])) {
+            return false;
+        }
+        const int prefix = dottedMaskToPrefix(tokens[3]);
+        if (prefix < 0) {
+            return false;
+        }
+        ipOut = tokens[2];
+        prefixOut = prefix;
+        return true;
+    }
+    return false;
+}
+
+static bool isSafeLinuxInterfaceName(const std::string& value) {
+    if (value.empty()) {
+        return false;
+    }
+    for (char ch : value) {
+        const bool ok = std::isalnum(static_cast<unsigned char>(ch)) || ch == '-' || ch == '_' || ch == '.' || ch == ':';
+        if (!ok) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static std::string bindIpKeyForInterfaceName(const std::string& ifaceName) {
+    const std::string lower = toLowerCopy(ifaceName);
+    if (lower.rfind("s1", 0) == 0) {
+        return "s1ap-bind-ip";
+    }
+    if (lower.rfind("s11", 0) == 0) {
+        return "s11-bind-ip";
+    }
+    if (lower.rfind("gn", 0) == 0 || lower.rfind("gp", 0) == 0) {
+        return "gn-gtp-u-bind-ip";
+    }
+    return "";
+}
+
+static std::string bindInterfaceKeyForInterfaceName(const std::string& ifaceName) {
+    const std::string lower = toLowerCopy(ifaceName);
+    if (lower.rfind("s1", 0) == 0) {
+        return "s1ap-bind-iface";
+    }
+    if (lower.rfind("s11", 0) == 0) {
+        return "s11-bind-iface";
+    }
+    if (lower.rfind("gn", 0) == 0 || lower.rfind("gp", 0) == 0) {
+        return "gn-gtp-u-bind-iface";
+    }
+    return "";
 }

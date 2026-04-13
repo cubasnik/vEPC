@@ -536,7 +536,7 @@
           - S1AP: localhost:{{ s1ap_port }}/sctp
           - Diameter: localhost:{{ diameter_port }}/udp
           - CLI: localhost:{{ cli_port }}/tcp
-          - SSH CLI: localhost:{{ ssh_cli_port }}/tcp (user: {{ ssh_cli_user }})
+          - SSH CLI: localhost:{{ ssh_cli_port }}/tcp (users: {{ cli_users | map(attribute='name') | join(', ') }})
           
           Optional use to access the CLI:
           $ docker compose -f {{ vepc_repo_path }}/docker-compose.yml exec vepc /app/vepc-cli
