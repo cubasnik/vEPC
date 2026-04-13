@@ -1,13 +1,8 @@
-version: '3.8'
-
 services:
   vepc:
     build:
       context: .
       dockerfile: Dockerfile
-      args:
-        REPO_URL: {{ vepc_repo_url }}
-        REPO_BRANCH: {{ vepc_repo_branch }}
     
     container_name: {{ vepc_container_name }}
     hostname: vepc

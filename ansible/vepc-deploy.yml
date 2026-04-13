@@ -2,18 +2,17 @@
 # Ansible Playbook for vEPC Deployment
 # Target: Ubuntu 22 LTS and higher
 # Requirements: Ansible 2.9+, Python 3.8+
-
----
-- name: Deploy vEPC (Evolved Packet Core) Emulator
+- name: Deploy vEPC (Evolved Packet Core Platform)
   hosts: vepc_hosts
   become: yes
   become_method: sudo
   
   vars:
     # Repository configuration
-    vepc_repo_url: "https://github.com/your-org/vEPC.git"
+    vepc_repo_url: "https://github.com/cubasnik/vEPC.git"
     vepc_repo_branch: "main"
     vepc_repo_path: "/opt/vepc"
+    vepc_redeploy_clean: true
     
     # User and group
     vepc_user: "vepc"
@@ -33,6 +32,9 @@
     s1ap_port: 36412
     diameter_port: 3868
     cli_port: 5555
+    ssh_cli_enabled: true
+    ssh_cli_port: 2205
+    ssh_cli_user: "vepccli"
     
     # Docker configuration
     docker_registry: "docker.io"
@@ -76,18 +78,40 @@
           - ca-certificates
           - gnupg
           - lsb-release
+          - openssh-server
         state: present
 
     # ==================== Docker Installation ====================
-    - name: Add Docker GPG key
-      apt_key:
-        url: https://download.docker.com/linux/ubuntu/gpg
-        state: present
+    - name: Remove legacy Docker apt sources to avoid Signed-By conflicts
+      shell: |
+        set -e
+        for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+          [ -f "$f" ] || continue
+          if grep -q "download.docker.com/linux/ubuntu" "$f"; then
+            sed -i '/download\.docker\.com\/linux\/ubuntu/d' "$f"
+          fi
+        done
+      args:
+        executable: /bin/bash
 
-    - name: Add Docker repository
+    - name: Ensure apt keyrings directory exists
+      file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+
+    - name: Install Docker GPG key to keyring
+      get_url:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        dest: /etc/apt/keyrings/docker.asc
+        mode: '0644'
+
+    - name: Add Docker repository (signed-by keyring)
       apt_repository:
-        repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+        repo: "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+        filename: docker
         state: present
+        update_cache: yes
 
     - name: Install Docker
       apt:
@@ -108,14 +132,12 @@
     - name: Create vepc group
       group:
         name: "{{ vepc_group }}"
-        gid: "{{ vepc_gid }}"
         state: present
 
     - name: Create vepc user
       user:
         name: "{{ vepc_user }}"
         group: "{{ vepc_group }}"
-        uid: "{{ vepc_uid }}"
         home: "/home/{{ vepc_user }}"
         shell: /bin/bash
         createhome: yes
@@ -135,49 +157,74 @@
         group: "{{ vepc_group }}"
         mode: '0755'
       loop:
-        - "{{ vepc_repo_path }}"
         - "{{ config_path }}"
         - "{{ log_path }}"
-        - "/opt/vepc/scripts"
 
     # ==================== Repository Setup ====================
-    - name: Check if repository exists
-      stat:
-        path: "{{ vepc_repo_path }}/.git"
-      register: repo_stat
+    - name: Remove existing repository path on redeploy
+      file:
+        path: "{{ vepc_repo_path }}"
+        state: absent
+      when: vepc_redeploy_clean | bool
 
-    - name: Clone vEPC repository
+    - name: Ensure repository directory exists
+      file:
+        path: "{{ vepc_repo_path }}"
+        state: directory
+        owner: "{{ vepc_user }}"
+        group: "{{ vepc_group }}"
+        mode: '0755'
+
+    - name: Allow git safe.directory for root
+      command: git config --global --add safe.directory {{ vepc_repo_path }}
+      changed_when: false
+
+    - name: Allow git safe.directory for deployment user
+      command: git config --global --add safe.directory {{ vepc_repo_path }}
+      become: true
+      become_user: "{{ vepc_user }}"
+      changed_when: false
+
+    - name: Clone or update repository from GitHub (force clean)
       git:
         repo: "{{ vepc_repo_url }}"
         dest: "{{ vepc_repo_path }}"
         version: "{{ vepc_repo_branch }}"
-        force: yes
-      become: no
+        update: true
+        force: true
+      become: true
       become_user: "{{ vepc_user }}"
-      when: not repo_stat.stat.exists
-
-    - name: Update existing repository
-      shell: |
-        cd {{ vepc_repo_path }}
-        git fetch origin
-        git checkout {{ vepc_repo_branch }}
-        git pull origin {{ vepc_repo_branch }}
-      become: no
-      become_user: "{{ vepc_user }}"
-      when: repo_stat.stat.exists
-      register: git_pull
-      changed_when: "'Already up to date' not in git_pull.stdout"
+    - name: Ensure scripts directory exists after repository setup
+      file:
+        path: "{{ vepc_repo_path }}/scripts"
+        state: directory
+        owner: "{{ vepc_user }}"
+        group: "{{ vepc_group }}"
+        mode: '0755'
 
     # ==================== Docker Build ====================
+    - name: Render deployment Dockerfile to target repository
+      template:
+        src: "Dockerfile.j2"
+        dest: "{{ vepc_repo_path }}/Dockerfile"
+        owner: "{{ vepc_user }}"
+        group: "{{ vepc_group }}"
+        mode: '0644'
+
+    - name: Render .dockerignore to target repository
+      template:
+        src: ".dockerignore.j2"
+        dest: "{{ vepc_repo_path }}/.dockerignore"
+        owner: "{{ vepc_user }}"
+        group: "{{ vepc_group }}"
+        mode: '0644'
+
     - name: Build Docker image from Dockerfile
       docker_image:
         name: "{{ vepc_docker_image }}"
         build:
           path: "{{ vepc_repo_path }}"
           dockerfile: Dockerfile
-          args:
-            REPO_URL: "{{ vepc_repo_url }}"
-            REPO_BRANCH: "{{ vepc_repo_branch }}"
         source: build
         state: present
       register: docker_build
@@ -210,10 +257,10 @@
       notify: restart vepc container
 
     # ==================== Container Deployment ====================
-    - name: Start vEPC container with docker-compose
+    - name: Start vEPC container with docker compose
       shell: |
         cd {{ vepc_repo_path }}
-        docker-compose up -d
+        docker compose up -d --force-recreate --remove-orphans
       become: no
       become_user: "{{ vepc_user }}"
       environment:
@@ -278,6 +325,140 @@
       when: ansible_distribution == "Ubuntu"
       ignore_errors: yes
 
+    - name: Configure dedicated SSH-to-CLI access user
+      user:
+        name: "{{ ssh_cli_user }}"
+        shell: /bin/bash
+        createhome: yes
+        state: present
+      when: ssh_cli_enabled | bool
+
+    - name: Add SSH CLI user to docker group
+      user:
+        name: "{{ ssh_cli_user }}"
+        groups: docker
+        append: yes
+      when: ssh_cli_enabled | bool
+
+    - name: Check for root authorized_keys
+      stat:
+        path: /root/.ssh/authorized_keys
+      register: root_authorized_keys
+      when: ssh_cli_enabled | bool
+
+    - name: Ensure SSH directory exists for CLI user
+      file:
+        path: "/home/{{ ssh_cli_user }}/.ssh"
+        state: directory
+        owner: "{{ ssh_cli_user }}"
+        group: "{{ ssh_cli_user }}"
+        mode: '0700'
+      when: ssh_cli_enabled | bool
+
+    - name: Reuse root authorized_keys for CLI user when available
+      copy:
+        src: /root/.ssh/authorized_keys
+        dest: "/home/{{ ssh_cli_user }}/.ssh/authorized_keys"
+        remote_src: true
+        owner: "{{ ssh_cli_user }}"
+        group: "{{ ssh_cli_user }}"
+        mode: '0600'
+      when: ssh_cli_enabled | bool and root_authorized_keys.stat.exists
+
+    - name: Remove legacy shared sshd CLI port config
+      file:
+        path: /etc/ssh/sshd_config.d/90-vepc-cli.conf
+        state: absent
+      when: ssh_cli_enabled | bool
+      notify: reload ssh
+
+    - name: Install dedicated SSH daemon config for CLI access
+      copy:
+        dest: /etc/ssh/sshd_config_vepc_cli
+        mode: '0600'
+        content: |
+          Port {{ ssh_cli_port }}
+          ListenAddress 0.0.0.0
+          Protocol 2
+          PidFile /run/sshd_vepc_cli.pid
+          AuthorizedKeysFile .ssh/authorized_keys
+          HostKey /etc/ssh/ssh_host_rsa_key
+          HostKey /etc/ssh/ssh_host_ecdsa_key
+          HostKey /etc/ssh/ssh_host_ed25519_key
+          PasswordAuthentication yes
+          PubkeyAuthentication yes
+          KbdInteractiveAuthentication no
+          ChallengeResponseAuthentication no
+          UsePAM yes
+          PermitRootLogin no
+          AllowUsers {{ ssh_cli_user }}
+          PermitTTY yes
+          X11Forwarding no
+          AllowTcpForwarding no
+          PermitTunnel no
+          PrintMotd no
+          Subsystem sftp internal-sftp
+          ForceCommand docker exec -it {{ vepc_container_name }} /app/vepc-cli
+      when: ssh_cli_enabled | bool
+
+    - name: Validate dedicated CLI sshd configuration
+      command: /usr/sbin/sshd -t -f /etc/ssh/sshd_config_vepc_cli
+      changed_when: false
+      when: ssh_cli_enabled | bool
+
+    - name: Install dedicated CLI sshd systemd service
+      copy:
+        dest: /etc/systemd/system/vepc-cli-sshd.service
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=vEPC dedicated SSH CLI service
+          After=network.target docker.service
+          Requires=docker.service
+
+          [Service]
+          Type=simple
+          ExecStartPre=/usr/sbin/sshd -t -f /etc/ssh/sshd_config_vepc_cli
+          ExecStart=/usr/sbin/sshd -D -f /etc/ssh/sshd_config_vepc_cli
+          Restart=always
+          RestartSec=3
+
+          [Install]
+          WantedBy=multi-user.target
+      when: ssh_cli_enabled | bool
+      notify: reload systemd
+
+    - name: Open dedicated SSH CLI port in UFW
+      ufw:
+        rule: allow
+        port: "{{ ssh_cli_port }}"
+        proto: tcp
+      when: ssh_cli_enabled | bool and ansible_distribution == "Ubuntu"
+      ignore_errors: yes
+
+    - name: Ensure SSH service is enabled and running
+      service:
+        name: ssh
+        state: started
+        enabled: yes
+      when: ssh_cli_enabled | bool
+
+    - name: Start dedicated CLI sshd service
+      systemd:
+        name: vepc-cli-sshd
+        state: restarted
+        enabled: yes
+        daemon_reload: yes
+      when: ssh_cli_enabled | bool
+
+    - name: Wait for dedicated SSH CLI port to become ready
+      wait_for:
+        host: "127.0.0.1"
+        port: "{{ ssh_cli_port }}"
+        delay: 1
+        timeout: 30
+      when: ssh_cli_enabled | bool
+
     # ==================== Network Configuration ====================
     - name: Enable IP forwarding
       sysctl:
@@ -326,9 +507,10 @@
           - S1AP: localhost:{{ s1ap_port }}/sctp
           - Diameter: localhost:{{ diameter_port }}/udp
           - CLI: localhost:{{ cli_port }}/tcp
+          - SSH CLI: localhost:{{ ssh_cli_port }}/tcp (user: {{ ssh_cli_user }})
           
           Optional use to access the CLI:
-          $ docker-compose -f {{ vepc_repo_path }}/docker-compose.yml exec vepc /app/vepc-cli
+          $ docker compose -f {{ vepc_repo_path }}/docker-compose.yml exec vepc /app/vepc-cli
           
           View logs:
           $ docker logs -f {{ vepc_container_name }}
@@ -342,6 +524,11 @@
       systemd:
         daemon_reload: yes
 
+    - name: reload ssh
+      service:
+        name: ssh
+        state: restarted
+
     - name: enable vepc service
       systemd:
         name: vepc
@@ -350,7 +537,7 @@
     - name: restart vepc container
       shell: |
         cd {{ vepc_repo_path }}
-        docker-compose restart
+        docker compose restart
       become: no
       become_user: "{{ vepc_user }}"
       ignore_errors: yes

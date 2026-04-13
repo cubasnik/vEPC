@@ -68,6 +68,6 @@ volumes:
     driver: local
 
 networks:
-  default:
+  vepc-network:
     name: vepc-network
     driver: bridge
