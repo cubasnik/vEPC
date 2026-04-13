@@ -1775,9 +1775,9 @@ static bool isValidHostnameToken(const std::string& value) {
 static void printSoftwareAbout() {
     printSectionTitle("ABOUT", 72);
     printKeyValueTable({
-        {"Product", "vEPC CLI"},
-        {"Description", "Virtual Evolved Packet Core command line interface"},
-        {"Наименование", "ООО \"ЭрикссонСофт\""}
+        {"Product", "vEPC"},
+        {"Description", "Virtual Evolved Packet Core"},
+        {"Организация", "ООО \"ЭрикссонСофт\""}
     });
 }
 
