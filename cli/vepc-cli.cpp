@@ -18,12 +18,15 @@ std::map<int, size_t> iface_num_to_idx;
 #include <sys/un.h>
 #include <unistd.h>
 #include <cstdio>
+#include "linux_interface.h"
 #else
 #define _WINSOCK_DEPRECATED_NO_WARNINGS
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <io.h>
 #endif
+
+#include "cisco_cli_commands.h"
 
 #ifdef _WIN32
 #define CLI_TCP_HOST    "127.0.0.1"
@@ -1226,6 +1229,117 @@ static void sendToServer(const std::string& cmd) {
 #endif
 }
 
+#ifndef _WIN32
+/**
+ * Create a VLAN sub-interface on Linux
+ * Usage: create-vlan eth0 100
+ */
+static void handleCreateVlanInterface(const std::vector<std::string>& tokens) {
+    if (tokens.size() < 3) {
+        printLocalError("Usage: create-vlan <parent-interface> <vlan-id>");
+        return;
+    }
+    
+    std::string parent = tokens[1];
+    std::string vlan_str = tokens[2];
+    
+    try {
+        int vlan_id = std::stoi(vlan_str);
+        if (createVlanInterface(parent, vlan_id)) {
+            printLocalInfo("VLAN interface " + parent + "." + std::to_string(vlan_id) + " created successfully");
+        }
+    } catch (const std::exception& e) {
+        printLocalError("Failed to create VLAN: " + std::string(e.what()));
+    }
+}
+
+/**
+ * Delete a Linux interface
+ * Usage: delete-interface eth0.100
+ */
+static void handleDeleteInterface(const std::vector<std::string>& tokens) {
+    if (tokens.size() < 2) {
+        printLocalError("Usage: delete-interface <interface-name>");
+        return;
+    }
+    
+    std::string iface_name = tokens[1];
+    if (deleteInterface(iface_name)) {
+        printLocalInfo("Interface " + iface_name + " deleted successfully");
+    }
+}
+
+/**
+ * Bring up a Linux interface
+ * Usage: up-interface eth0.100
+ */
+static void handleUpInterface(const std::vector<std::string>& tokens) {
+    if (tokens.size() < 2) {
+        printLocalError("Usage: up-interface <interface-name>");
+        return;
+    }
+    
+    std::string iface_name = tokens[1];
+    if (bringUpInterface(iface_name)) {
+        printLocalInfo("Interface " + iface_name + " brought up");
+    }
+}
+
+/**
+ * Bring down a Linux interface
+ * Usage: down-interface eth0.100
+ */
+static void handleDownInterface(const std::vector<std::string>& tokens) {
+    if (tokens.size() < 2) {
+        printLocalError("Usage: down-interface <interface-name>");
+        return;
+    }
+    
+    std::string iface_name = tokens[1];
+    if (bringDownInterface(iface_name)) {
+        printLocalInfo("Interface " + iface_name + " brought down");
+    }
+}
+
+/**
+ * Assign IP address to a Linux interface
+ * Usage: set-ip eth0.100 192.168.1.1/24
+ */
+static void handleSetInterfaceIp(const std::vector<std::string>& tokens) {
+    if (tokens.size() < 3) {
+        printLocalError("Usage: set-ip <interface-name> <ip-address>/<prefix>");
+        return;
+    }
+    
+    std::string iface_name = tokens[1];
+    std::string ip = tokens[2];
+    if (setInterfaceIp(iface_name, ip)) {
+        printLocalInfo("IP address " + ip + " assigned to " + iface_name);
+    }
+}
+
+/**
+ * List all Linux interfaces
+ * Usage: list-interfaces
+ */
+static void handleListInterfaces(const std::vector<std::string>& tokens) {
+    auto interfaces = listAllInterfaces();
+    if (interfaces.empty()) {
+        printLocalWarning("No interfaces found");
+        return;
+    }
+    
+    printLocalBanner("System Interfaces", "");
+    for (const auto& iface : interfaces) {
+        std::string status = isInterfaceUp(iface) ? "UP" : "DOWN";
+        std::string ip = getInterfaceIp(iface);
+        std::cout << GRN << std::left << std::setw(20) << iface << RST
+                  << semanticColor(status) << std::setw(10) << status << RST
+                  << (ip.empty() ? "N/A" : ip) << "\n";
+    }
+}
+#endif
+
 static void handleIface(const Interface& iface, const std::string& action) {
     if (action.empty() || action == "status") {
         printLocalBanner("== Interface:", iface.name);
@@ -1414,6 +1528,12 @@ static bool isHelpCommand(const std::vector<std::string>& tokens) {
 
 static void printModeHint() {
     printLocalInfo("Structured mode commands: configure terminal | interface <name> | shutdown | no shutdown | end");
+    printLocalInfo("Cisco-style commands: show [running-config | interface | status | logging]");
+#ifndef _WIN32
+    printLocalInfo("Linux interface commands: create-vlan <parent> <vlan-id> | delete-interface <name>");
+    printLocalInfo("                          up-interface <name> | down-interface <name> | set-ip <name> <ip/prefix>");
+    printLocalInfo("                          list-interfaces");
+#endif
 }
 
 static int resolveIface(const std::string& token) {
@@ -1553,6 +1673,49 @@ int main() {
             printPrompt(promptForMode(mode, selectedInterface));
             continue;
         }
+
+        // Linux interface management commands (when in Exec or Config mode)
+#ifndef _WIN32
+        if ((mode == CliMode::Exec || mode == CliMode::Config) && !tokens.empty()) {
+            std::string cmd = toLowerCopy(tokens[0]);
+            
+            if (cmd == "create-vlan") {
+                handleCreateVlanInterface(tokens);
+                printPrompt(promptForMode(mode, selectedInterface));
+                continue;
+            }
+            
+            if (cmd == "delete-interface") {
+                handleDeleteInterface(tokens);
+                printPrompt(promptForMode(mode, selectedInterface));
+                continue;
+            }
+            
+            if (cmd == "up-interface") {
+                handleUpInterface(tokens);
+                printPrompt(promptForMode(mode, selectedInterface));
+                continue;
+            }
+            
+            if (cmd == "down-interface") {
+                handleDownInterface(tokens);
+                printPrompt(promptForMode(mode, selectedInterface));
+                continue;
+            }
+            
+            if (cmd == "set-ip") {
+                handleSetInterfaceIp(tokens);
+                printPrompt(promptForMode(mode, selectedInterface));
+                continue;
+            }
+            
+            if (cmd == "list-interfaces") {
+                handleListInterfaces(tokens);
+                printPrompt(promptForMode(mode, selectedInterface));
+                continue;
+            }
+        }
+#endif
 
         if (mode == CliMode::Config && isInterfaceCommand(tokens)) {
             const int idx = resolveIface(tokens[1]);
