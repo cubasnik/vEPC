@@ -34,8 +34,15 @@
     cli_port: 5555
     ssh_cli_enabled: true
     ssh_cli_port: 2205
-    ssh_cli_user: "vepccli"
-    
+    # List of CLI users to create. Passwords are stored in plaintext here and hashed on deployment.
+    # Override per host in inventory with: cli_users='[{"name":"admin","password":"secret"}]'
+    cli_users:
+      - name: "vepccli"
+        password: "vepccli"
+
+    # Set to true to force Docker image rebuild on every deploy (--no-cache)
+    vepc_force_rebuild: true
+
     # Docker configuration
     docker_registry: "docker.io"
     vepc_docker_image: "vepc:latest"
@@ -237,14 +244,13 @@
         mode: '0644'
 
     - name: Build Docker image from Dockerfile
-      docker_image:
-        name: "{{ vepc_docker_image }}"
-        build:
-          path: "{{ vepc_repo_path }}"
-          dockerfile: Dockerfile
-        source: build
-        state: present
+      shell: |
+        cd {{ vepc_repo_path }}
+        docker compose build {% if vepc_force_rebuild | bool %}--no-cache {% endif %}--pull vepc
+      become: true
+      become_user: "{{ vepc_user }}"
       register: docker_build
+      changed_when: true
       notify: restart vepc container
 
     # ==================== Configuration ====================
@@ -342,19 +348,23 @@
       when: ansible_distribution == "Ubuntu"
       ignore_errors: yes
 
-    - name: Configure dedicated SSH-to-CLI access user
+    - name: Configure CLI access users
       user:
-        name: "{{ ssh_cli_user }}"
+        name: "{{ item.name }}"
+        password: "{{ item.password | password_hash('sha512') }}"
+        update_password: always
         shell: /bin/bash
         createhome: yes
         state: present
+      loop: "{{ cli_users }}"
       when: ssh_cli_enabled | bool
 
-    - name: Add SSH CLI user to docker group
+    - name: Add CLI users to docker group
       user:
-        name: "{{ ssh_cli_user }}"
+        name: "{{ item.name }}"
         groups: docker
         append: yes
+      loop: "{{ cli_users }}"
       when: ssh_cli_enabled | bool
 
     - name: Check for root authorized_keys
@@ -363,23 +373,25 @@
       register: root_authorized_keys
       when: ssh_cli_enabled | bool
 
-    - name: Ensure SSH directory exists for CLI user
+    - name: Ensure SSH directory exists for each CLI user
       file:
-        path: "/home/{{ ssh_cli_user }}/.ssh"
+        path: "/home/{{ item.name }}/.ssh"
         state: directory
-        owner: "{{ ssh_cli_user }}"
-        group: "{{ ssh_cli_user }}"
+        owner: "{{ item.name }}"
+        group: "{{ item.name }}"
         mode: '0700'
+      loop: "{{ cli_users }}"
       when: ssh_cli_enabled | bool
 
-    - name: Reuse root authorized_keys for CLI user when available
+    - name: Reuse root authorized_keys for CLI users when available
       copy:
         src: /root/.ssh/authorized_keys
-        dest: "/home/{{ ssh_cli_user }}/.ssh/authorized_keys"
+        dest: "/home/{{ item.name }}/.ssh/authorized_keys"
         remote_src: true
-        owner: "{{ ssh_cli_user }}"
-        group: "{{ ssh_cli_user }}"
+        owner: "{{ item.name }}"
+        group: "{{ item.name }}"
         mode: '0600'
+      loop: "{{ cli_users }}"
       when: ssh_cli_enabled | bool and root_authorized_keys.stat.exists
 
     - name: Remove legacy shared sshd CLI port config
@@ -408,7 +420,7 @@
           ChallengeResponseAuthentication no
           UsePAM yes
           PermitRootLogin no
-          AllowUsers {{ ssh_cli_user }}
+          AllowUsers {{ cli_users | map(attribute='name') | join(' ') }}
           PermitTTY yes
           X11Forwarding no
           AllowTcpForwarding no

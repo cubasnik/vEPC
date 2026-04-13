@@ -4,29 +4,40 @@
 [vepc_hosts]
 # Define your target hosts here
 # Examples:
-# vepc-prod ansible_host=192.168.1.100 ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/id_rsa
+# vepc-prod ansible_host=192.168.1.34 ansible_user=root
 # vepc-test ansible_host=192.168.1.101 ansible_user=ubuntu
+vepc-prod ansible_host=192.168.1.34 ansible_user=root
 
 # Localhost deployment (for testing)
-localhost ansible_connection=local ansible_become_password_file=/tmp/sudo_pass
+#localhost ansible_connection=local ansible_become_password_file=/tmp/sudo_pass
 
 [vepc_hosts:vars]
 # Repository settings
-vepc_repo_url=https://github.com/your-org/vEPC.git
+vepc_repo_url=https://github.com/cubasnik/vEPC.git
 vepc_repo_branch=main
 
 # Network settings
-mcc=250
-mnc=20
+mcc=255
+mnc=99
 gtp_c_port=2123
 s1ap_port=36412
 diameter_port=3868
 cli_port=5555
 
 # User settings
-ansible_user=ubuntu
+ansible_user=root
 ansible_become=yes
 ansible_become_method=sudo
+
+# CLI users — override to add/change users and passwords.
+# Format: JSON list of {name, password}.
+# Example with multiple users:
+# cli_users='[{"name":"vepccli","password":"vepccli"},{"name":"admin","password":"Admin123"}]'
+# Default (defined in playbook vars): single user vepccli / vepccli
+
+# Force Docker image rebuild on every deploy (default: true)
+# Set to false to skip --no-cache and reuse layer cache (faster re-deploys):
+# vepc_force_rebuild=false
 
 # Docker settings
 docker_registry=docker.io
