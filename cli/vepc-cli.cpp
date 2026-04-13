@@ -65,6 +65,8 @@ struct Interface {
     std::string desc;
 };
 static std::vector<Interface> g_ifaces;
+static std::string g_cliHostname = "vepc";
+static bool g_suppressPromptOutput = false;
 
 struct InterfaceOverviewRow {
     std::string name;
@@ -142,6 +144,9 @@ static void printSemanticValue(const std::string& value) {
 }
 
 static void printPrompt(const std::string& promptText = "> ") {
+    if (g_suppressPromptOutput) {
+        return;
+    }
     std::cout << BOLD << GRN << promptText << RST;
 }
 
@@ -1370,8 +1375,9 @@ static void printExecHelp() {
     printSectionTitle("EXEC MODE", 72);
     printKeyValueTable({
         {"Navigation", "configure terminal | exit"},
-        {"Show", "show running-config | show logging | show interface [<name> [detail]]"},
+        {"Show", "show running-config | show logging | show interface [<name> [detail]] | show about"},
         {"Runtime", "status | state | restart | stop | save"},
+        {"Info", "about"},
         {"Config", "set <key> <value>"},
         {"Help", "help | ?"}
     });
@@ -1382,8 +1388,9 @@ static void printConfigHelp() {
     printKeyValueTable({
         {"Navigation", "interface <name> | end | exit"},
         {"Runtime", "restart | stop"},
-        {"Config", "set <key> <value> | commit"},
-        {"Show", "show running-config | show logging | show interface [<name> [detail]]"},
+        {"Config", "set <key> <value> | hostname <name> | commit"},
+        {"Show", "show running-config | show logging | show interface [<name> [detail]] | show about"},
+        {"Info", "about"},
         {"Help", "help | ?"}
     });
 }
@@ -1445,7 +1452,7 @@ static bool startsWithCaseInsensitive(const std::string& value, const std::strin
 
 static std::vector<std::string> firstWordCommandsForMode(CliMode mode) {
     std::vector<std::string> out = {
-        "show", "status", "state", "restart", "stop", "help", "exit", "quit", "set", "save", "write"
+        "show", "about", "status", "state", "restart", "stop", "help", "exit", "quit", "set", "save", "write"
     };
 
     if (mode == CliMode::Exec) {
@@ -1455,6 +1462,7 @@ static std::vector<std::string> firstWordCommandsForMode(CliMode mode) {
     if (mode == CliMode::Config) {
         out.push_back("interface");
         out.push_back("int");
+        out.push_back("hostname");
         out.push_back("commit");
         out.push_back("end");
     }
@@ -1500,7 +1508,7 @@ static std::vector<std::string> completionCandidates(
     if (tokenIndex <= 0) {
         candidates = firstWordCommandsForMode(mode);
     } else if (t0 == "show" && tokenIndex == 1) {
-        candidates = {"running-config", "logging", "log", "interface", "iface", "config"};
+        candidates = {"running-config", "logging", "log", "interface", "iface", "config", "about"};
     } else if ((t0 == "show") && (t1 == "interface" || t1 == "iface") && tokenIndex == 2) {
         for (const auto& iface : g_ifaces) {
             candidates.push_back(iface.name);
@@ -1701,12 +1709,12 @@ static bool readInteractiveLineLinux(
 
 static std::string promptForMode(CliMode mode, const std::string& ifaceName = "") {
     if (mode == CliMode::Config) {
-        return "vepc(config)# ";
+        return g_cliHostname + "(config)# ";
     }
     if (mode == CliMode::InterfaceConfig) {
-        return "vepc(config-if-" + ifaceName + ")# ";
+        return g_cliHostname + "(config-if-" + ifaceName + ")# ";
     }
-    return "vepc# ";
+    return g_cliHostname + "# ";
 }
 
 static bool isConfigureTerminalCommand(const std::vector<std::string>& tokens) {
@@ -1732,6 +1740,45 @@ static bool isShowLoggingCommand(const std::vector<std::string>& tokens) {
     return tokens.size() == 2
         && toLowerCopy(tokens[0]) == "show"
         && (toLowerCopy(tokens[1]) == "logging" || toLowerCopy(tokens[1]) == "log");
+}
+
+static bool isShowAboutCommand(const std::vector<std::string>& tokens) {
+    return tokens.size() == 2
+        && toLowerCopy(tokens[0]) == "show"
+        && toLowerCopy(tokens[1]) == "about";
+}
+
+static bool isAboutCommand(const std::vector<std::string>& tokens) {
+    return tokens.size() == 1 && toLowerCopy(tokens[0]) == "about";
+}
+
+static bool isHostnameCommand(const std::vector<std::string>& tokens) {
+    return !tokens.empty() && toLowerCopy(tokens[0]) == "hostname";
+}
+
+static bool isValidHostnameToken(const std::string& value) {
+    if (value.empty() || value.size() > 63) {
+        return false;
+    }
+    if (value.front() == '-' || value.back() == '-') {
+        return false;
+    }
+    for (char ch : value) {
+        const bool ok = std::isalnum(static_cast<unsigned char>(ch)) || ch == '-';
+        if (!ok) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static void printSoftwareAbout() {
+    printSectionTitle("ABOUT", 72);
+    printKeyValueTable({
+        {"Product", "vEPC CLI"},
+        {"Description", "Virtual Evolved Packet Core command line interface"},
+        {"Наименование", "ООО \"ЭрикссонСофт\""}
+    });
 }
 
 static std::string canonicalServerCommandLabel(const std::string& sourceCommand) {
@@ -1805,8 +1852,8 @@ static bool isHelpCommand(const std::vector<std::string>& tokens) {
 }
 
 static void printModeHint() {
-    printLocalInfo("Structured mode commands: configure terminal | interface <name> | shutdown | no shutdown | end");
-    printLocalInfo("Cisco-style commands: show [running-config | interface | status | logging]");
+    printLocalInfo("Structured mode commands: configure terminal | interface <name> | hostname <name> | shutdown | no shutdown | end");
+    printLocalInfo("Cisco-style commands: show [running-config | interface | status | logging | about] | about");
 #ifndef _WIN32
     printLocalInfo("Linux interface commands: create-vlan <parent> <vlan-id> | delete-interface <name>");
     printLocalInfo("                          up-interface <name> | down-interface <name> | set-ip <name> <ip/prefix>");
@@ -1836,6 +1883,11 @@ static const char* SYS_CMDS[] = { "", "status", "logs", "state", "show", "stop" 
 int main() {
     loadInterfaces();
     const bool interactiveSession = isInteractiveSession();
+#if !defined(_WIN32) && defined(VEPC_USE_READLINE)
+    g_suppressPromptOutput = interactiveSession;
+#else
+    g_suppressPromptOutput = false;
+#endif
     if (interactiveSession) {
         printHelp();
         printModeHint();
@@ -1942,6 +1994,12 @@ int main() {
             continue;
         }
 
+        if ((mode == CliMode::Exec || mode == CliMode::Config) && (isShowAboutCommand(tokens) || isAboutCommand(tokens))) {
+            printSoftwareAbout();
+            printPrompt(promptForMode(mode, selectedInterface));
+            continue;
+        }
+
         if ((mode == CliMode::Exec || mode == CliMode::Config) && isShowLoggingCommand(tokens)) {
             sendToServer("log");
             printPrompt(promptForMode(mode, selectedInterface));
@@ -2023,6 +2081,18 @@ int main() {
 
         if (mode == CliMode::Config || mode == CliMode::InterfaceConfig) {
             const std::string head = tokens.empty() ? "" : toLowerCopy(tokens[0]);
+            if (mode == CliMode::Config && isHostnameCommand(tokens)) {
+                if (tokens.size() != 2) {
+                    printLocalError("Usage: hostname <name>");
+                } else if (!isValidHostnameToken(tokens[1])) {
+                    printLocalError("Invalid hostname. Allowed: letters, digits, '-', max 63 chars.");
+                } else {
+                    g_cliHostname = tokens[1];
+                    printLocalInfo("Hostname set to: " + g_cliHostname);
+                }
+                printPrompt(promptForMode(mode, selectedInterface));
+                continue;
+            }
             if (head == "end") {
                 mode = CliMode::Exec;
                 selectedInterface.clear();
