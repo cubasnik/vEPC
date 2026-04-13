@@ -100,6 +100,11 @@
         state: directory
         mode: '0755'
 
+    - name: Remove malformed docker.sources file if present
+      file:
+        path: /etc/apt/sources.list.d/docker.sources
+        state: absent
+
     - name: Install Docker GPG key to keyring
       get_url:
         url: https://download.docker.com/linux/ubuntu/gpg
