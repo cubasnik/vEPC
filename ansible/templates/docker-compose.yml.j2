@@ -11,12 +11,9 @@ services:
       - SYS_ADMIN
       - NET_ADMIN
       - SYS_PTRACE
-    
-    ports:
-      - "{{ gtp_c_port | default('2123') }}:{{ gtp_c_port | default('2123') }}/udp"
-      - "{{ s1ap_port | default('36412') }}:{{ s1ap_port | default('36412') }}/sctp"
-      - "{{ diameter_port | default('3868') }}:{{ diameter_port | default('3868') }}/udp"
-      - "{{ cli_port | default('5555') }}:{{ cli_port | default('5555') }}/tcp"
+
+    # Required for Linux interface operations (create-vlan/bind) on host NICs.
+    network_mode: host
     
     volumes:
       - {{ config_path }}:/etc/vepc
@@ -46,15 +43,7 @@ services:
         max-size: "10m"
         max-file: "3"
         labels: "vepc=core"
-    
-    networks:
-      - vepc-network
 
 volumes:
   vepc-logs:
     driver: local
-
-networks:
-  vepc-network:
-    name: vepc-network
-    driver: bridge
