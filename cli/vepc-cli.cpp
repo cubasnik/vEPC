@@ -1562,7 +1562,7 @@ static std::vector<std::string> completionCandidates(
         for (const auto& iface : systemIfaces) {
             candidates.push_back(iface);
         }
-    } else if (mode == CliMode::Config && t0 == "configure" && tokenIndex == 1) {
+    } else if (mode == CliMode::Exec && (t0 == "configure" || t0 == "conf") && tokenIndex == 1) {
         candidates = {"terminal"};
     }
 
@@ -2197,7 +2197,7 @@ int main() {
 
                 g_ifaces[idx].ip = virtualIp;
                 if (!saveInterfaces()) {
-                    printLocalError("Failed to persist interface virtual IP to " INTERFACES_CONF);
+                    printLocalWarning("Virtual IP applied at runtime, but interfaces.conf is not writable by current user.");
                 } else {
                     printLocalInfo("Virtual IP for " + selectedInterface + " set to " + virtualIp + "/" + std::to_string(prefix));
                 }
@@ -2222,7 +2222,7 @@ int main() {
 
                 g_ifaces[idx].ip = "0.0.0.0";
                 if (!saveInterfaces()) {
-                    printLocalError("Failed to persist interface IP reset to " INTERFACES_CONF);
+                    printLocalWarning("Virtual IP reset applied at runtime, but interfaces.conf is not writable by current user.");
                 } else {
                     printLocalInfo("Virtual IP for " + selectedInterface + " reset to 0.0.0.0");
                 }
