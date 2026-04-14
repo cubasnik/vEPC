@@ -768,12 +768,54 @@ static std::string hostNetSysfsRoot() {
     if (raw && *raw) {
         return std::string(raw);
     }
-    return "/host_sys_class_net";
+    return "/sys/class/net";
 }
 
 static bool hostNetSysfsAvailable() {
     std::error_code ec;
     return std::filesystem::is_directory(hostNetSysfsRoot(), ec);
+}
+
+struct PortInfo {
+    std::string state;
+    std::string mac;
+};
+
+static std::map<std::string, PortInfo> readTrafficPortsInfo() {
+    std::map<std::string, PortInfo> result;
+    const char* cp = getenv("CONFIG_PATH");
+    const std::string path = std::string(cp && *cp ? cp : "/etc/vepc") + "/traffic_ports.info";
+    std::ifstream in(path);
+    if (!in.good()) {
+        return result;
+    }
+    std::string line;
+    while (std::getline(in, line)) {
+        line = trim(line);
+        if (line.empty()) {
+            continue;
+        }
+        const size_t eq = line.find('=');
+        if (eq == std::string::npos) {
+            continue;
+        }
+        const std::string name = trim(line.substr(0, eq));
+        const std::string rest = trim(line.substr(eq + 1));
+        const size_t bar = rest.find('|');
+        PortInfo info;
+        if (bar == std::string::npos) {
+            info.state = toUpperCopy(rest);
+            info.mac = "N/A";
+        } else {
+            info.state = toUpperCopy(trim(rest.substr(0, bar)));
+            info.mac = trim(rest.substr(bar + 1));
+        }
+        if (info.state.empty()) {
+            info.state = "UNKNOWN";
+        }
+        result[name] = info;
+    }
+    return result;
 }
 
 static std::string readFirstLineFromFile(const std::string& path) {
@@ -999,14 +1041,21 @@ static void showPortsFromLinux() {
         printLocalWarning("No traffic ports configured. Set VEPC_TRAFFIC_PORTS (via Ansible traffic_linux_ports).");
     }
 
+    const auto portInfoMap = readTrafficPortsInfo();
     std::set<std::string> existing(all.begin(), all.end());
     std::vector<KeyValueEntry> allowedRows;
     for (const auto& port : allowed) {
-        const bool present = existing.find(port) != existing.end() || hostInterfaceExists(port);
-        const std::string state = present ? hostInterfaceState(port) : "NOT FOUND";
-        const std::string ip = (present && existing.find(port) != existing.end()) ? getInterfaceIp(port) : "N/A";
-        const std::string mac = present ? hostInterfaceMac(port) : "N/A";
-        allowedRows.push_back({port, state + " | " + (ip.empty() ? "N/A" : ip) + " | " + mac});
+        std::string state, mac;
+        const auto infoIt = portInfoMap.find(port);
+        if (infoIt != portInfoMap.end()) {
+            state = infoIt->second.state;
+            mac = infoIt->second.mac;
+        } else {
+            const bool present = existing.find(port) != existing.end() || hostInterfaceExists(port);
+            state = present ? hostInterfaceState(port) : "NOT FOUND";
+            mac = present ? hostInterfaceMac(port) : "N/A";
+        }
+        allowedRows.push_back({port, state + " | " + mac});
     }
 
     printSectionTitle("ALLOWED PORT STATUS", 72);

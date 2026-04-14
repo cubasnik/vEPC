@@ -334,6 +334,25 @@
         - { src: "config/vsgsn.conf.j2", dest: "vsgsn.conf" }
       notify: restart vepc container
 
+    - name: Collect host traffic port state and MAC
+      shell: |
+        port={{ item }}
+        state=$(cat /sys/class/net/${port}/operstate 2>/dev/null || echo unknown)
+        mac=$(cat /sys/class/net/${port}/address 2>/dev/null || echo N/A)
+        echo "${port}=${state}|${mac}"
+      register: port_facts_raw
+      loop: "{{ traffic_linux_ports }}"
+      changed_when: false
+
+    - name: Write traffic ports info file
+      copy:
+        dest: "{{ config_path }}/traffic_ports.info"
+        content: "{{ port_facts_raw.results | map(attribute='stdout') | join('\n') }}\n"
+        owner: "{{ vepc_user }}"
+        group: "{{ vepc_group }}"
+        mode: '0644'
+      notify: restart vepc container
+
     # ==================== Docker Compose Setup ====================
     - name: Deploy docker-compose.yml
       template:
