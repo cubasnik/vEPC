@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <thread>
 #include <set>
+#include <filesystem>
 
 // Глобальная карта: номер в таблице -> индекс в g_ifaces
 std::map<int, size_t> iface_num_to_idx;
@@ -762,6 +763,72 @@ static void printInterfaceDiagLine(const std::string& line) {
 }
 
 #ifndef _WIN32
+static std::string hostNetSysfsRoot() {
+    const char* raw = getenv("HOST_SYS_CLASS_NET");
+    if (raw && *raw) {
+        return std::string(raw);
+    }
+    return "/host_sys_class_net";
+}
+
+static bool hostNetSysfsAvailable() {
+    std::error_code ec;
+    return std::filesystem::is_directory(hostNetSysfsRoot(), ec);
+}
+
+static std::string readFirstLineFromFile(const std::string& path) {
+    std::ifstream in(path);
+    std::string line;
+    if (in.good()) {
+        std::getline(in, line);
+    }
+    return trim(line);
+}
+
+static std::vector<std::string> listHostInterfacesFromSysfs() {
+    std::vector<std::string> out;
+    if (!hostNetSysfsAvailable()) {
+        return out;
+    }
+
+    std::error_code ec;
+    for (const auto& entry : std::filesystem::directory_iterator(hostNetSysfsRoot(), ec)) {
+        if (ec || !entry.is_directory()) {
+            continue;
+        }
+        out.push_back(entry.path().filename().string());
+    }
+    std::sort(out.begin(), out.end());
+    return out;
+}
+
+static bool hostInterfaceExists(const std::string& iface) {
+    if (iface.empty()) {
+        return false;
+    }
+    if (hostNetSysfsAvailable()) {
+        std::error_code ec;
+        return std::filesystem::exists(hostNetSysfsRoot() + "/" + iface, ec);
+    }
+
+    const auto all = listAllInterfaces();
+    return std::find(all.begin(), all.end(), iface) != all.end();
+}
+
+static std::string hostInterfaceState(const std::string& iface) {
+    if (hostNetSysfsAvailable()) {
+        const std::string state = toUpperCopy(readFirstLineFromFile(hostNetSysfsRoot() + "/" + iface + "/operstate"));
+        if (state == "UP") {
+            return "UP";
+        }
+        if (state.empty()) {
+            return "UNKNOWN";
+        }
+        return state;
+    }
+    return isInterfaceUp(iface) ? "UP" : "DOWN";
+}
+
 static std::string stripTrafficPortToken(std::string token) {
     token = trim(token);
     while (!token.empty() && (token.front() == '[' || token.front() == ']' || token.front() == '"' || token.front() == '\'')) {
@@ -834,6 +901,35 @@ static bool isTrafficPortAllowed(const std::string& iface) {
 }
 
 static std::vector<std::string> listPhysicalPorts() {
+    if (hostNetSysfsAvailable()) {
+        std::vector<std::string> physical;
+        const auto all = listHostInterfacesFromSysfs();
+        for (const auto& iface : all) {
+            if (iface.empty() || iface == "lo") {
+                continue;
+            }
+
+            if (iface.find('.') != std::string::npos
+                || iface.find(':') != std::string::npos
+                || startsWith(iface, "veth")
+                || startsWith(iface, "docker")
+                || startsWith(iface, "br-")
+                || startsWith(iface, "virbr")
+                || startsWith(iface, "cni")
+                || startsWith(iface, "tun")
+                || startsWith(iface, "tap")
+                || startsWith(iface, "wg")) {
+                continue;
+            }
+
+            std::error_code ec;
+            if (std::filesystem::exists(hostNetSysfsRoot() + "/" + iface + "/device", ec)) {
+                physical.push_back(iface);
+            }
+        }
+        return physical;
+    }
+
     std::vector<std::string> physical;
     const auto all = listAllInterfaces();
     for (const auto& iface : all) {
@@ -882,7 +978,7 @@ static void printPhysicalPortsSection() {
 
 static void showPortsFromLinux() {
     const auto allowed = configuredTrafficPorts();
-    const auto all = listAllInterfaces();
+    const auto all = hostNetSysfsAvailable() ? listHostInterfacesFromSysfs() : listAllInterfaces();
 
     printSectionTitle("TRAFFIC PORT POLICY", 72);
     printKeyValueTable({
@@ -896,9 +992,9 @@ static void showPortsFromLinux() {
     std::set<std::string> existing(all.begin(), all.end());
     std::vector<KeyValueEntry> allowedRows;
     for (const auto& port : allowed) {
-        const bool present = existing.find(port) != existing.end();
-        const std::string state = present ? (isInterfaceUp(port) ? "UP" : "DOWN") : "NOT FOUND";
-        const std::string ip = present ? getInterfaceIp(port) : "N/A";
+        const bool present = existing.find(port) != existing.end() || hostInterfaceExists(port);
+        const std::string state = present ? hostInterfaceState(port) : "NOT FOUND";
+        const std::string ip = (present && existing.find(port) != existing.end()) ? getInterfaceIp(port) : "N/A";
         allowedRows.push_back({port, state + " | " + (ip.empty() ? "N/A" : ip)});
     }
 

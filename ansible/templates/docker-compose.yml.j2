@@ -22,6 +22,7 @@ services:
       - {{ config_path }}:/etc/vepc
       - vepc-logs:{{ log_path }}
       - /var/lib/vepc:/var/lib/vepc
+      - /sys/class/net:/host_sys_class_net:ro
     
     environment:
       LOG_LEVEL: {{ log_level | default('info') }}
