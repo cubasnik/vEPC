@@ -762,6 +762,64 @@ static void printInterfaceDiagLine(const std::string& line) {
 }
 
 #ifndef _WIN32
+static std::vector<std::string> configuredTrafficPorts() {
+    std::vector<std::string> out;
+    const char* raw = getenv("VEPC_TRAFFIC_PORTS");
+    if (!raw || !*raw) {
+        return out;
+    }
+
+    std::string token;
+    std::istringstream ss(raw);
+    while (std::getline(ss, token, ',')) {
+        token = trim(token);
+        if (!token.empty()) {
+            out.push_back(token);
+        }
+    }
+    return out;
+}
+
+static std::string trafficPortsHint() {
+    const auto ports = configuredTrafficPorts();
+    if (ports.empty()) {
+        return "none";
+    }
+    std::ostringstream oss;
+    for (size_t i = 0; i < ports.size(); ++i) {
+        if (i > 0) {
+            oss << ", ";
+        }
+        oss << ports[i];
+    }
+    return oss.str();
+}
+
+static bool isTrafficPortAllowed(const std::string& iface) {
+    const auto allowed = configuredTrafficPorts();
+    if (allowed.empty()) {
+        return false;
+    }
+
+    for (const auto& candidate : allowed) {
+        if (iface == candidate) {
+            return true;
+        }
+    }
+
+    const size_t dotPos = iface.find('.');
+    if (dotPos != std::string::npos) {
+        const std::string parent = iface.substr(0, dotPos);
+        for (const auto& candidate : allowed) {
+            if (parent == candidate) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
 static std::vector<std::string> listPhysicalPorts() {
     std::vector<std::string> physical;
     const auto all = listAllInterfaces();
@@ -807,6 +865,38 @@ static void printPhysicalPortsSection() {
 
     printSectionTitle("PHYSICAL PORTS", 72);
     printKeyValueTable(rows);
+}
+
+static void showPortsFromLinux() {
+    const auto allowed = configuredTrafficPorts();
+    const auto all = listAllInterfaces();
+
+    printSectionTitle("TRAFFIC PORT POLICY", 72);
+    printKeyValueTable({
+        {"Allowed Ports", allowed.empty() ? "not configured" : trafficPortsHint()}
+    });
+
+    if (allowed.empty()) {
+        printLocalWarning("No traffic ports configured. Set VEPC_TRAFFIC_PORTS (via Ansible traffic_linux_ports).");
+    }
+
+    std::set<std::string> existing(all.begin(), all.end());
+    std::vector<KeyValueEntry> allowedRows;
+    for (const auto& port : allowed) {
+        const bool present = existing.find(port) != existing.end();
+        const std::string state = present ? (isInterfaceUp(port) ? "UP" : "DOWN") : "NOT FOUND";
+        const std::string ip = present ? getInterfaceIp(port) : "N/A";
+        allowedRows.push_back({port, state + " | " + (ip.empty() ? "N/A" : ip)});
+    }
+
+    printSectionTitle("ALLOWED PORT STATUS", 72);
+    if (allowedRows.empty()) {
+        printLocalWarning("Allowed port list is empty.");
+    } else {
+        printKeyValueTable(allowedRows);
+    }
+
+    printPhysicalPortsSection();
 }
 #endif
 
@@ -868,9 +958,6 @@ static void printServerResponse(const std::string& response, const std::string& 
         }
 
         printGroupedInterfaceTable(ifaceEntries);
-    #ifndef _WIN32
-        printPhysicalPortsSection();
-    #endif
         printServerBlockFooter();
         return;
     }
@@ -988,12 +1075,6 @@ static void printServerResponse(const std::string& response, const std::string& 
     }
 
     flushKeyValueTable();
-#ifndef _WIN32
-    const std::string normalizedSource = toLowerCopy(trim(sourceCommand));
-    if (startsWith(normalizedSource, "iface_status ")) {
-        printPhysicalPortsSection();
-    }
-#endif
     printServerBlockFooter();
 }
 
@@ -1104,6 +1185,7 @@ static void printHelp() {
         {"help", "-", "-", "-", "Show help"},
         {"show config", "-", "-", "-", "Show config"},
         {"show interface", "-", "-", "-", "Show interfaces"},
+        {"show ports", "-", "-", "-", "Show Linux traffic ports"},
         {"restart", "-", "-", "-", "Restart server"},
         {"log", "-", "-", "-", "Show log"}
     };
@@ -1228,7 +1310,7 @@ static void printHelp() {
     std::cout << "\n";
     printSectionTitle("MODE COMMANDS", 72);
     printKeyValueTable({
-        {"Exec", "configure terminal | show running-config | show logging | save"},
+        {"Exec", "configure terminal | show running-config | show logging | show ports | save"},
         {"Config", "interface <name> | end | exit | commit"},
         {"Interface", "shutdown | no shutdown | default | show interface <name> detail"}
     });
@@ -1337,6 +1419,11 @@ static void handleCreateVlanInterface(const std::vector<std::string>& tokens) {
     
     std::string parent = tokens[1];
     std::string vlan_str = tokens[2];
+
+    if (!isTrafficPortAllowed(parent)) {
+        printLocalError("VLAN is allowed only on traffic ports. Allowed: " + trafficPortsHint());
+        return;
+    }
     
     try {
         int vlan_id = std::stoi(vlan_str);
@@ -1465,7 +1552,7 @@ static void printExecHelp() {
     printSectionTitle("EXEC MODE", 72);
     printKeyValueTable({
         {"Navigation", "configure terminal | exit"},
-        {"Show", "show running-config | show logging | show interface [<name> [detail]] | show about"},
+        {"Show", "show running-config | show logging | show interface [<name> [detail]] | show ports | show about"},
         {"Runtime", "status | state | restart | stop | save"},
         {"Info", "about"},
         {"Config", "set <key> <value>"},
@@ -1479,7 +1566,7 @@ static void printConfigHelp() {
         {"Navigation", "interface <name> | end | exit"},
         {"Runtime", "restart | stop"},
         {"Config", "set <key> <value> | hostname <name> | commit"},
-        {"Show", "show running-config | show logging | show interface [<name> [detail]] | show about"},
+        {"Show", "show running-config | show logging | show interface [<name> [detail]] | show ports | show about"},
         {"Info", "about"},
         {"Help", "help | ?"}
     });
@@ -1600,7 +1687,7 @@ static std::vector<std::string> completionCandidates(
     if (tokenIndex <= 0) {
         candidates = firstWordCommandsForMode(mode);
     } else if (t0 == "show" && tokenIndex == 1) {
-        candidates = {"running-config", "logging", "log", "interface", "iface", "config", "about"};
+        candidates = {"running-config", "logging", "log", "interface", "iface", "ports", "config", "about"};
     } else if ((t0 == "show") && (t1 == "interface" || t1 == "iface") && tokenIndex == 2) {
         for (const auto& iface : g_ifaces) {
             candidates.push_back(iface.name);
@@ -1618,7 +1705,9 @@ static std::vector<std::string> completionCandidates(
     } else if (mode == CliMode::InterfaceConfig && t0 == "bind" && tokenIndex == 1) {
         const auto systemIfaces = listAllInterfaces();
         for (const auto& iface : systemIfaces) {
-            candidates.push_back(iface);
+            if (isTrafficPortAllowed(iface)) {
+                candidates.push_back(iface);
+            }
         }
     } else if (mode == CliMode::Exec && (t0 == "configure" || t0 == "conf") && tokenIndex == 1) {
         candidates = {"terminal"};
@@ -1849,6 +1938,12 @@ static bool isShowAboutCommand(const std::vector<std::string>& tokens) {
         && toLowerCopy(tokens[1]) == "about";
 }
 
+static bool isShowPortsCommand(const std::vector<std::string>& tokens) {
+    return tokens.size() == 2
+        && toLowerCopy(tokens[0]) == "show"
+        && toLowerCopy(tokens[1]) == "ports";
+}
+
 static bool isAboutCommand(const std::vector<std::string>& tokens) {
     return tokens.size() == 1 && toLowerCopy(tokens[0]) == "about";
 }
@@ -1954,7 +2049,7 @@ static bool isHelpCommand(const std::vector<std::string>& tokens) {
 
 static void printModeHint() {
     printLocalInfo("Structured mode commands: configure terminal | interface <name> | hostname <name> | shutdown | no shutdown | ip address <ip[/prefix]> | bind <linux-iface> | end");
-    printLocalInfo("Cisco-style commands: show [running-config | interface | status | logging | about] | about");
+    printLocalInfo("Cisco-style commands: show [running-config | interface | ports | status | logging | about] | about");
 #ifndef _WIN32
     printLocalInfo("Linux interface commands: create-vlan <parent> <vlan-id> | delete-interface <name>");
     printLocalInfo("                          up-interface <name> | down-interface <name> | set-ip <name> <ip/prefix>");
@@ -2010,6 +2105,7 @@ int main() {
         {"help", "-", "-", "-", "Show help"},
         {"show config", "-", "-", "-", "Show config"},
         {"show interface", "-", "-", "-", "Show interfaces"},
+        {"show ports", "-", "-", "-", "Show Linux traffic ports"},
         {"restart", "-", "-", "-", "Restart server"},
         {"log", "-", "-", "-", "Show log"}
     };
@@ -2128,6 +2224,16 @@ int main() {
             } else {
                 printLocalError("Usage: show interface [<name> [detail]]");
             }
+            printPrompt(promptForMode(mode, selectedInterface));
+            continue;
+        }
+
+        if ((mode == CliMode::Exec || mode == CliMode::Config) && isShowPortsCommand(tokens)) {
+#ifndef _WIN32
+            showPortsFromLinux();
+#else
+            printLocalWarning("show ports is available only on Linux");
+#endif
             printPrompt(promptForMode(mode, selectedInterface));
             continue;
         }
@@ -2300,6 +2406,12 @@ int main() {
                     continue;
                 }
 
+                if (!isTrafficPortAllowed(tokens[1])) {
+                    printLocalError("Binding allowed only on traffic ports. Allowed: " + trafficPortsHint());
+                    printPrompt(promptForMode(mode, selectedInterface));
+                    continue;
+                }
+
                 const int idx = resolveIface(selectedInterface);
                 if (idx < 0) {
                     printLocalError("Unknown interface context: " + selectedInterface);
@@ -2372,6 +2484,13 @@ int main() {
                 else if (cmd == "help") { printHelp(); if (interactiveSession) { printModeHint(); } printPrompt(promptForMode(mode, selectedInterface)); }
                 else if (cmd == "show config") sendToServer("show config");
                 else if (cmd == "show interface") sendToServer("show interface");
+                else if (cmd == "show ports") {
+#ifndef _WIN32
+                    showPortsFromLinux();
+#else
+                    printLocalWarning("show ports is available only on Linux");
+#endif
+                }
                 else if (cmd == "restart") sendToServer("restart");
                 else if (cmd == "log") sendToServer("log");
                 printPrompt(promptForMode(mode, selectedInterface));

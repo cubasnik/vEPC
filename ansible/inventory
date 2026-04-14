@@ -35,6 +35,10 @@ ansible_become_method=sudo
 # cli_users='[{"name":"vepccli","password":"vepccli"},{"name":"admin","password":"Admin123"}]'
 # Default (defined in playbook vars): single user vepccli / vepccli
 
+# Traffic ports allowlist (required): Linux interfaces allowed for bind/create-vlan traffic operations.
+# Example:
+# traffic_linux_ports=["ens160","eth1"]
+
 # Force Docker image rebuild on every deploy (default: true)
 # Set to false to skip --no-cache and reuse layer cache (faster re-deploys):
 # vepc_force_rebuild=false

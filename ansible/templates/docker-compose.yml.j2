@@ -29,6 +29,7 @@ services:
       LOG_PATH: {{ log_path }}
       MCC: {{ mcc | default('250') }}
       MNC: {{ mnc | default('20') }}
+      VEPC_TRAFFIC_PORTS: "{{ traffic_linux_ports | join(',') }}"
     
     stdin_open: true
     tty: true

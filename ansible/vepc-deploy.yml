@@ -52,6 +52,9 @@
     enable_network_namespaces: true
     mcc: "250"
     mnc: "20"
+    # Linux physical interfaces allowed for user traffic operations (bind/create-vlan).
+    # Must be explicitly provided per host in inventory.
+    traffic_linux_ports: []
     
   pre_tasks:
     - name: Validate target OS
@@ -72,6 +75,29 @@
       args:
         executable: /bin/bash
       changed_when: false
+
+    - name: Validate traffic Linux port allowlist is configured
+      assert:
+        that:
+          - traffic_linux_ports is defined
+          - traffic_linux_ports | length > 0
+        fail_msg: >-
+          Set traffic_linux_ports in inventory, for example:
+          traffic_linux_ports=["ens160","eth1"]
+
+    - name: Validate traffic Linux port names
+      assert:
+        that:
+          - item is match('^[A-Za-z0-9_.:-]+$')
+        fail_msg: "Invalid traffic port name '{{ item }}'"
+      loop: "{{ traffic_linux_ports }}"
+
+    - name: Validate traffic Linux ports exist on target host
+      assert:
+        that:
+          - item in ansible_interfaces
+        fail_msg: "Configured traffic port '{{ item }}' not found on host interfaces: {{ ansible_interfaces | join(', ') }}"
+      loop: "{{ traffic_linux_ports }}"
 
   tasks:
     # ==================== System Preparation ====================
@@ -537,6 +563,7 @@
           - Diameter: localhost:{{ diameter_port }}/udp
           - CLI: localhost:{{ cli_port }}/tcp
           - SSH CLI: localhost:{{ ssh_cli_port }}/tcp (users: {{ cli_users | map(attribute='name') | join(', ') }})
+          - Traffic Linux Ports: {{ traffic_linux_ports | join(', ') }}
           
           Optional use to access the CLI:
           $ docker compose -f {{ vepc_repo_path }}/docker-compose.yml exec vepc /app/vepc-cli

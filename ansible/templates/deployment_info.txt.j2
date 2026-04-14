@@ -38,6 +38,9 @@ Service Ports:
   Diameter S6a: 0.0.0.0:{{ diameter_port }}/udp
   CLI Management: localhost:{{ cli_port }}/tcp
 
+Allowed Linux Traffic Ports:
+  {{ traffic_linux_ports | join(', ') }}
+
 Firewall Rules:
   - Allow UDP port {{ gtp_c_port }} (GTP-C)
   - Allow SCTP port {{ s1ap_port }} (S1AP)
