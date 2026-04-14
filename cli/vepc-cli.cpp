@@ -829,6 +829,17 @@ static std::string hostInterfaceState(const std::string& iface) {
     return isInterfaceUp(iface) ? "UP" : "DOWN";
 }
 
+static std::string hostInterfaceMac(const std::string& iface) {
+    if (hostNetSysfsAvailable()) {
+        const std::string mac = trim(readFirstLineFromFile(hostNetSysfsRoot() + "/" + iface + "/address"));
+        return mac.empty() ? "N/A" : mac;
+    }
+
+    const std::string path = "/sys/class/net/" + iface + "/address";
+    const std::string mac = trim(readFirstLineFromFile(path));
+    return mac.empty() ? "N/A" : mac;
+}
+
 static std::string stripTrafficPortToken(std::string token) {
     token = trim(token);
     while (!token.empty() && (token.front() == '[' || token.front() == ']' || token.front() == '"' || token.front() == '\'')) {
@@ -962,7 +973,6 @@ static std::vector<std::string> listPhysicalPorts() {
 static void printPhysicalPortsSection() {
     const auto ports = listPhysicalPorts();
     if (ports.empty()) {
-        printLocalWarning("Physical Ports: not detected");
         return;
     }
 
@@ -995,7 +1005,8 @@ static void showPortsFromLinux() {
         const bool present = existing.find(port) != existing.end() || hostInterfaceExists(port);
         const std::string state = present ? hostInterfaceState(port) : "NOT FOUND";
         const std::string ip = (present && existing.find(port) != existing.end()) ? getInterfaceIp(port) : "N/A";
-        allowedRows.push_back({port, state + " | " + (ip.empty() ? "N/A" : ip)});
+        const std::string mac = present ? hostInterfaceMac(port) : "N/A";
+        allowedRows.push_back({port, state + " | " + (ip.empty() ? "N/A" : ip) + " | " + mac});
     }
 
     printSectionTitle("ALLOWED PORT STATUS", 72);
