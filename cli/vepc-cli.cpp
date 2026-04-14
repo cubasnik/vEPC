@@ -46,6 +46,14 @@ std::map<int, size_t> iface_num_to_idx;
 
 #define INTERFACES_CONF "config/interfaces.conf"
 
+static std::string resolveInterfacesConfPath() {
+    const char* cp = getenv("CONFIG_PATH");
+    if (cp && *cp) {
+        return std::string(cp) + "/interfaces.conf";
+    }
+    return INTERFACES_CONF;
+}
+
 #define RST  "\033[0m"
 #define BOLD "\033[1m"
 #define CYAN "\033[1;36m"
@@ -933,7 +941,8 @@ static void printServerResponse(const std::string& response, const std::string& 
 
 static void loadInterfaces() {
     g_ifaces.clear();
-    std::ifstream f(INTERFACES_CONF);
+    const std::string primary = resolveInterfacesConfPath();
+    std::ifstream f(primary);
     if (!f.is_open()) {
         std::string alt = std::string("../") + INTERFACES_CONF;
         f.open(alt);
@@ -971,7 +980,8 @@ static void loadInterfaces() {
 }
 
 static bool saveInterfaces() {
-    std::ofstream out(INTERFACES_CONF, std::ios::trunc);
+    const std::string primary = resolveInterfacesConfPath();
+    std::ofstream out(primary, std::ios::trunc);
     if (!out.is_open()) {
         const std::string alt = std::string("../") + INTERFACES_CONF;
         out.open(alt, std::ios::trunc);
