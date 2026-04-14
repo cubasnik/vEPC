@@ -761,6 +761,55 @@ static void printInterfaceDiagLine(const std::string& line) {
     std::cout << "\n";
 }
 
+#ifndef _WIN32
+static std::vector<std::string> listPhysicalPorts() {
+    std::vector<std::string> physical;
+    const auto all = listAllInterfaces();
+    for (const auto& iface : all) {
+        if (iface.empty() || iface == "lo") {
+            continue;
+        }
+
+        // Skip common virtual/tunnel interfaces.
+        if (iface.find('.') != std::string::npos
+            || iface.find(':') != std::string::npos
+            || startsWith(iface, "veth")
+            || startsWith(iface, "docker")
+            || startsWith(iface, "br-")
+            || startsWith(iface, "virbr")
+            || startsWith(iface, "cni")
+            || startsWith(iface, "tun")
+            || startsWith(iface, "tap")
+            || startsWith(iface, "wg")) {
+            continue;
+        }
+
+        const std::string checkCmd = "test -e /sys/class/net/" + iface + "/device > /dev/null 2>&1";
+        if (std::system(checkCmd.c_str()) == 0) {
+            physical.push_back(iface);
+        }
+    }
+    return physical;
+}
+
+static void printPhysicalPortsSection() {
+    const auto ports = listPhysicalPorts();
+    if (ports.empty()) {
+        printLocalWarning("Physical Ports: not detected");
+        return;
+    }
+
+    std::vector<KeyValueEntry> rows;
+    rows.reserve(ports.size());
+    for (size_t i = 0; i < ports.size(); ++i) {
+        rows.push_back({"Port " + std::to_string(i + 1), ports[i]});
+    }
+
+    printSectionTitle("PHYSICAL PORTS", 72);
+    printKeyValueTable(rows);
+}
+#endif
+
 static void printServerResponse(const std::string& response, const std::string& sourceCommand = "") {
     if (trim(response).empty()) {
         return;
@@ -819,6 +868,9 @@ static void printServerResponse(const std::string& response, const std::string& 
         }
 
         printGroupedInterfaceTable(ifaceEntries);
+    #ifndef _WIN32
+        printPhysicalPortsSection();
+    #endif
         printServerBlockFooter();
         return;
     }
@@ -936,6 +988,12 @@ static void printServerResponse(const std::string& response, const std::string& 
     }
 
     flushKeyValueTable();
+#ifndef _WIN32
+    const std::string normalizedSource = toLowerCopy(trim(sourceCommand));
+    if (startsWith(normalizedSource, "iface_status ")) {
+        printPhysicalPortsSection();
+    }
+#endif
     printServerBlockFooter();
 }
 
