@@ -762,6 +762,19 @@ static void printInterfaceDiagLine(const std::string& line) {
 }
 
 #ifndef _WIN32
+static std::string stripTrafficPortToken(std::string token) {
+    token = trim(token);
+    while (!token.empty() && (token.front() == '[' || token.front() == ']' || token.front() == '"' || token.front() == '\'')) {
+        token.erase(token.begin());
+        token = trim(token);
+    }
+    while (!token.empty() && (token.back() == '[' || token.back() == ']' || token.back() == '"' || token.back() == '\'')) {
+        token.pop_back();
+        token = trim(token);
+    }
+    return token;
+}
+
 static std::vector<std::string> configuredTrafficPorts() {
     std::vector<std::string> out;
     const char* raw = getenv("VEPC_TRAFFIC_PORTS");
@@ -772,7 +785,7 @@ static std::vector<std::string> configuredTrafficPorts() {
     std::string token;
     std::istringstream ss(raw);
     while (std::getline(ss, token, ',')) {
-        token = trim(token);
+        token = stripTrafficPortToken(token);
         if (!token.empty()) {
             out.push_back(token);
         }

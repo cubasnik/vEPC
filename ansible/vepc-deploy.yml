@@ -80,6 +80,25 @@
           Set traffic_linux_ports in inventory, for example:
           traffic_linux_ports='["ens160","eth1"]'
 
+    - name: Normalize traffic Linux port allowlist
+      set_fact:
+        traffic_linux_ports: >-
+          {{
+            traffic_linux_ports
+            if traffic_linux_ports is sequence and traffic_linux_ports is not string
+            else (traffic_linux_ports | from_yaml)
+          }}
+
+    - name: Validate traffic Linux port allowlist type
+      assert:
+        that:
+          - traffic_linux_ports is sequence
+          - traffic_linux_ports is not string
+          - traffic_linux_ports | length > 0
+        fail_msg: >-
+          traffic_linux_ports must be a list, for example:
+          traffic_linux_ports='["ens160","eth1"]'
+
     - name: Validate traffic Linux port names
       assert:
         that:
