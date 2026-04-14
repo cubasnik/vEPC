@@ -72,7 +72,7 @@ gtp_c_port=2123
 s1ap_port=36412
 diameter_port=3868
 cli_port=5555
-traffic_linux_ports=["ens160","eth1"]
+traffic_linux_ports='["ens160","eth1"]'
 ```
 
 `traffic_linux_ports` is required and defines Linux interfaces allowed for traffic operations (`bind`, `create-vlan`) to prevent accidental changes on management interfaces.

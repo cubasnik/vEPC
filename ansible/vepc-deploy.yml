@@ -50,9 +50,6 @@
     
     # Network configuration
     enable_network_namespaces: true
-    # Linux physical interfaces allowed for user traffic operations (bind/create-vlan).
-    # Must be explicitly provided per host in inventory.
-    traffic_linux_ports: []
     
   pre_tasks:
     - name: Validate target OS
@@ -81,7 +78,7 @@
           - traffic_linux_ports | length > 0
         fail_msg: >-
           Set traffic_linux_ports in inventory, for example:
-          traffic_linux_ports=["ens160","eth1"]
+          traffic_linux_ports='["ens160","eth1"]'
 
     - name: Validate traffic Linux port names
       assert:
