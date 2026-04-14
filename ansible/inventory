@@ -17,8 +17,6 @@ vepc_repo_url=https://github.com/cubasnik/vEPC.git
 vepc_repo_branch=main
 
 # Network settings
-mcc=255
-mnc=99
 gtp_c_port=2123
 s1ap_port=36412
 diameter_port=3868

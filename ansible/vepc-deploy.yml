@@ -50,8 +50,6 @@
     
     # Network configuration
     enable_network_namespaces: true
-    mcc: "250"
-    mnc: "20"
     # Linux physical interfaces allowed for user traffic operations (bind/create-vlan).
     # Must be explicitly provided per host in inventory.
     traffic_linux_ports: []
@@ -98,6 +96,31 @@
           - item in ansible_interfaces
         fail_msg: "Configured traffic port '{{ item }}' not found on host interfaces: {{ ansible_interfaces | join(', ') }}"
       loop: "{{ traffic_linux_ports }}"
+
+    - name: Read existing vEPC config to preserve PLMN across redeploys
+      slurp:
+        src: "{{ config_path }}/vepc.config"
+      register: vepc_config_existing
+      ignore_errors: yes
+
+    - name: Compute effective PLMN values
+      set_fact:
+        plmn_mcc: >-
+          {{
+            ((vepc_config_existing.content | default('') | b64decode)
+            | regex_findall('(?mi)^\s*MCC\s*=\s*([0-9]{3})\s*$')
+            | first) | default('250')
+          }}
+        plmn_mnc: >-
+          {{
+            ((vepc_config_existing.content | default('') | b64decode)
+            | regex_findall('(?mi)^\s*MNC\s*=\s*([0-9]{2,3})\s*$')
+            | first) | default('20')
+          }}
+
+    - name: Compute padded MNC for realm fields
+      set_fact:
+        plmn_mnc3: "{{ '%03d' | format(plmn_mnc | int) }}"
 
   tasks:
     # ==================== System Preparation ====================

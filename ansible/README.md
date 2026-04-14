@@ -68,8 +68,6 @@ Edit `ansible/inventory` to customize deployment variables:
 [vepc_hosts:vars]
 vepc_repo_url=https://github.com/your-org/vEPC.git
 vepc_repo_branch=main
-mcc=250
-mnc=20
 gtp_c_port=2123
 s1ap_port=36412
 diameter_port=3868
@@ -79,11 +77,18 @@ traffic_linux_ports=["ens160","eth1"]
 
 `traffic_linux_ports` is required and defines Linux interfaces allowed for traffic operations (`bind`, `create-vlan`) to prevent accidental changes on management interfaces.
 
+PLMN (`MCC`/`MNC`) is no longer set via Ansible variables. Configure it from CLI:
+
+```text
+vepc# configure terminal
+vepc(config)# plmn 250 20
+```
+
 Or override variables at runtime:
 
 ```bash
 ansible-playbook -i ansible/inventory vepc-deploy.yml \
-  -e "mcc=310 mnc=410 vepc_repo_branch=develop"
+  -e "vepc_repo_branch=develop"
 ```
 
 ## Deployment

@@ -1311,7 +1311,7 @@ static void printHelp() {
     printSectionTitle("MODE COMMANDS", 72);
     printKeyValueTable({
         {"Exec", "configure terminal | show running-config | show logging | show ports | save"},
-        {"Config", "interface <name> | end | exit | commit"},
+        {"Config", "interface <name> | plmn <mcc> <mnc> | end | exit | commit"},
         {"Interface", "shutdown | no shutdown | default | show interface <name> detail"}
     });
 
@@ -1565,7 +1565,7 @@ static void printConfigHelp() {
     printKeyValueTable({
         {"Navigation", "interface <name> | end | exit"},
         {"Runtime", "restart | stop"},
-        {"Config", "set <key> <value> | hostname <name> | commit"},
+        {"Config", "set <key> <value> | hostname <name> | plmn <mcc> <mnc> | commit"},
         {"Show", "show running-config | show logging | show interface [<name> [detail]] | show ports | show about"},
         {"Info", "about"},
         {"Help", "help | ?"}
@@ -1640,6 +1640,7 @@ static std::vector<std::string> firstWordCommandsForMode(CliMode mode) {
         out.push_back("interface");
         out.push_back("int");
         out.push_back("hostname");
+        out.push_back("plmn");
         out.push_back("commit");
         out.push_back("end");
     }
@@ -1711,6 +1712,8 @@ static std::vector<std::string> completionCandidates(
         }
     } else if (mode == CliMode::Exec && (t0 == "configure" || t0 == "conf") && tokenIndex == 1) {
         candidates = {"terminal"};
+    } else if (mode == CliMode::Config && t0 == "plmn" && tokenIndex == 1) {
+        candidates = {"250", "255", "310"};
     }
 
     if (!selectedInterface.empty() && (t0 == "show") && (t1 == "interface" || t1 == "iface") && tokenIndex == 2) {
@@ -1952,6 +1955,30 @@ static bool isHostnameCommand(const std::vector<std::string>& tokens) {
     return !tokens.empty() && toLowerCopy(tokens[0]) == "hostname";
 }
 
+static bool isPlmnCommand(const std::vector<std::string>& tokens) {
+    return !tokens.empty() && toLowerCopy(tokens[0]) == "plmn";
+}
+
+static bool isDigitsOnly(const std::string& value) {
+    if (value.empty()) {
+        return false;
+    }
+    for (char ch : value) {
+        if (!std::isdigit(static_cast<unsigned char>(ch))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool isValidMcc(const std::string& value) {
+    return value.size() == 3 && isDigitsOnly(value);
+}
+
+static bool isValidMnc(const std::string& value) {
+    return (value.size() == 2 || value.size() == 3) && isDigitsOnly(value);
+}
+
 static bool isValidHostnameToken(const std::string& value) {
     if (value.empty() || value.size() > 63) {
         return false;
@@ -2048,7 +2075,7 @@ static bool isHelpCommand(const std::vector<std::string>& tokens) {
 }
 
 static void printModeHint() {
-    printLocalInfo("Structured mode commands: configure terminal | interface <name> | hostname <name> | shutdown | no shutdown | ip address <ip[/prefix]> | bind <linux-iface> | end");
+    printLocalInfo("Structured mode commands: configure terminal | interface <name> | hostname <name> | plmn <mcc> <mnc> | shutdown | no shutdown | ip address <ip[/prefix]> | bind <linux-iface> | end");
     printLocalInfo("Cisco-style commands: show [running-config | interface | ports | status | logging | about] | about");
 #ifndef _WIN32
     printLocalInfo("Linux interface commands: create-vlan <parent> <vlan-id> | delete-interface <name>");
@@ -2304,6 +2331,21 @@ int main() {
                 } else {
                     g_cliHostname = tokens[1];
                     printLocalInfo("Hostname set to: " + g_cliHostname);
+                }
+                printPrompt(promptForMode(mode, selectedInterface));
+                continue;
+            }
+            if (mode == CliMode::Config && isPlmnCommand(tokens)) {
+                if (tokens.size() != 3) {
+                    printLocalError("Usage: plmn <mcc> <mnc>");
+                } else if (!isValidMcc(tokens[1])) {
+                    printLocalError("Invalid MCC. Expected exactly 3 digits.");
+                } else if (!isValidMnc(tokens[2])) {
+                    printLocalError("Invalid MNC. Expected 2 or 3 digits.");
+                } else {
+                    sendToServer("set mcc " + tokens[1]);
+                    sendToServer("set mnc " + tokens[2]);
+                    printLocalInfo("PLMN updated: MCC=" + tokens[1] + " MNC=" + tokens[2]);
                 }
                 printPrompt(promptForMode(mode, selectedInterface));
                 continue;

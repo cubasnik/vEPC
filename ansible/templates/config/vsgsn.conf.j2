@@ -4,7 +4,7 @@
 [SGSN]
 # SGSN Identity
 Code = 1
-Realm = vepc.epc.mnc{{ mnc | default('020') }}.mcc{{ mcc | default('250') }}.3gppnetwork.org
+Realm = vepc.epc.mnc{{ plmn_mnc3 | default('020') }}.mcc{{ plmn_mcc | default('250') }}.3gppnetwork.org
 
 # Gb Interface Configuration (to BSS via BSSGP)
 Gb-IP = 0.0.0.0
@@ -45,8 +45,8 @@ Peer-MME-IP = {{ peer_mme_ip | default('127.0.0.1') }}
 Peer-MME-Port = 2125
 
 # Network Configuration
-MCC = {{ mcc | default('250') }}
-MNC = {{ mnc | default('20') }}
+MCC = {{ plmn_mcc | default('250') }}
+MNC = {{ plmn_mnc | default('20') }}
 LAC = 1
 RAC = 1
 
@@ -61,7 +61,7 @@ T3314 = 300
 T3330 = 300
 
 # Subscriber Settings
-IMSI-Prefix = 250{{ mnc | default('20') }}
+IMSI-Prefix = {{ plmn_mcc | default('250') }}{{ plmn_mnc | default('20') }}
 Max-UE = 10000
 Default-APN = internet
 

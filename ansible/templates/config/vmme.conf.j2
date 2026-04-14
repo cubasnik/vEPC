@@ -5,7 +5,7 @@
 # MME Identity
 Code = 1
 GroupID = 1
-Realm = vepc.epc.mnc{{ mnc | default('020') }}.mcc{{ mcc | default('250') }}.3gppnetwork.org
+Realm = vepc.epc.mnc{{ plmn_mnc3 | default('020') }}.mcc{{ plmn_mcc | default('250') }}.3gppnetwork.org
 
 # S1AP Configuration
 S1AP-IP = 0.0.0.0
@@ -18,7 +18,7 @@ S6a-IP = 0.0.0.0
 S6a-Port = {{ diameter_port | default('3868') }}
 HSS-IP = {{ hss_ip | default('127.0.0.1') }}
 HSS-Port = {{ hss_port | default('3868') }}
-HSS-Realm = hss.epc.mnc{{ mnc | default('020') }}.mcc{{ mcc | default('250') }}.3gppnetwork.org
+HSS-Realm = hss.epc.mnc{{ plmn_mnc3 | default('020') }}.mcc{{ plmn_mcc | default('250') }}.3gppnetwork.org
 
 # S11 Configuration (GTP-C to S-GW)
 S11-IP = 0.0.0.0
@@ -41,11 +41,11 @@ Peer-SGSN-Port = 2125
 # S13 Configuration (EPS authentication)
 S13-IP = 0.0.0.0
 S13-Port = 3869
-EAA-Realm = eaa.epc.mnc{{ mnc | default('020') }}.mcc{{ mcc | default('250') }}.3gppnetwork.org
+EAA-Realm = eaa.epc.mnc{{ plmn_mnc3 | default('020') }}.mcc{{ plmn_mcc | default('250') }}.3gppnetwork.org
 
 # Network Configuration
-MCC = {{ mcc | default('250') }}
-MNC = {{ mnc | default('20') }}
+MCC = {{ plmn_mcc | default('250') }}
+MNC = {{ plmn_mnc | default('20') }}
 LAC = 1
 TAI-List = {{ tai_list | default('1,2,3') }}
 
@@ -60,7 +60,7 @@ T3423 = 3600
 Timer-Security = 300
 
 # Subscriber Settings
-IMSI-Prefix = 250{{ mnc | default('20') }}
+IMSI-Prefix = {{ plmn_mcc | default('250') }}{{ plmn_mnc | default('20') }}
 Max-UE = 10000
 Default-APN = internet
 
