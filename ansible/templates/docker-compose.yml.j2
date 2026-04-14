@@ -27,7 +27,7 @@ services:
       LOG_LEVEL: {{ log_level | default('info') }}
       CONFIG_PATH: /etc/vepc
       LOG_PATH: {{ log_path }}
-      VEPC_TRAFFIC_PORTS: "{{ traffic_linux_ports | join(',') }}"
+      VEPC_TRAFFIC_PORTS: '{{ traffic_linux_ports | join(",") }}'
     
     stdin_open: true
     tty: true
