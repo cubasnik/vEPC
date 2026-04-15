@@ -4,9 +4,9 @@
 [vepc_hosts]
 # Define your target hosts here
 # Examples:
-# vepc-prod ansible_host=192.168.1.34 ansible_user=root
-# vepc-test ansible_host=192.168.1.101 ansible_user=ubuntu
-vepc-prod ansible_host=192.168.1.34 ansible_user=root
+# vepc-prod ansible_host=192.168.1.34 ansible_user=root traffic_linux_ports=eno1,eno2
+# vepc-test ansible_host=192.168.1.101 ansible_user=ubuntu traffic_linux_ports=eth1,eth2
+vepc-prod ansible_host=192.168.1.34 ansible_user=root traffic_linux_ports=eno1,eno2
 
 # Localhost deployment (for testing)
 #localhost ansible_connection=local ansible_become_password_file=/tmp/sudo_pass
@@ -34,8 +34,10 @@ ansible_become_method=sudo
 # Default (defined in playbook vars): single user vepccli / vepccli
 
 # Traffic ports allowlist (required): Linux interfaces allowed for bind/create-vlan traffic operations.
-# Configure in group_vars/vepc_hosts.yml (see comments there)
-# Default interfaces: eno1, eno2, eno3, eno4 (for this host configuration)
+# You can set it per host above, for example:
+# vepc-prod ansible_host=192.168.1.34 ansible_user=root traffic_linux_ports=eno1,eno2
+# Or set a group default here:
+traffic_linux_ports=eno1,eno2
 
 # Force Docker image rebuild on every deploy (default: true)
 # Set to false to skip --no-cache and reuse layer cache (faster re-deploys):

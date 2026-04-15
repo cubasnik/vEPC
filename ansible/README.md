@@ -62,7 +62,15 @@ vepc-test ansible_host=192.168.1.101 ansible_user=ubuntu ansible_ssh_private_key
 
 ### 2. Customize Variables
 
-Use `ansible/group_vars/vepc_hosts.yml` for list variables (recommended):
+You can specify traffic interfaces directly in the inventory:
+
+```ini
+[vepc_hosts]
+vepc-prod ansible_host=192.168.1.100 ansible_user=ubuntu traffic_linux_ports=eno1,eno2
+vepc-test ansible_host=192.168.1.101 ansible_user=ubuntu traffic_linux_ports=ens3,ens4
+```
+
+Or use `ansible/group_vars/vepc_hosts.yml` for list variables:
 
 ```yaml
 traffic_linux_ports:
@@ -70,7 +78,7 @@ traffic_linux_ports:
   - eno2
 ```
 
-`traffic_linux_ports` is required and defines Linux interfaces allowed for traffic operations (`bind`, `create-vlan`) to prevent accidental changes on management interfaces.
+`traffic_linux_ports` is required and defines Linux interfaces allowed for traffic operations (`bind`, `create-vlan`) to prevent accidental changes on management interfaces. Supported formats are a comma-separated inventory value like `traffic_linux_ports=eno1,eno2` or a YAML list.
 
 Important:
 - Interfaces enslaved to Open vSwitch (`master ovs-system`) are rejected during deploy because VLAN sub-interfaces cannot be created on them.

@@ -77,8 +77,9 @@
           - traffic_linux_ports is defined
           - traffic_linux_ports | length > 0
         fail_msg: >-
-          Set traffic_linux_ports as YAML list in ansible/group_vars/vepc_hosts.yml,
-          for example: traffic_linux_ports: ["eno1", "eno2"]
+          Set traffic_linux_ports in ansible/inventory or ansible/group_vars/vepc_hosts.yml,
+          for example: traffic_linux_ports=eno1,eno2
+          or: traffic_linux_ports: ["eno1", "eno2"]
 
     - name: Normalize traffic Linux port allowlist
       set_fact:
@@ -86,7 +87,13 @@
           {{
             traffic_linux_ports
             if traffic_linux_ports is sequence and traffic_linux_ports is not string
-            else (traffic_linux_ports | from_yaml)
+            else (
+              (traffic_linux_ports | trim | regex_search('^\[.*\]$'))
+              | ternary(
+                  (traffic_linux_ports | from_yaml),
+                  ((traffic_linux_ports | regex_replace('\s+', '')).split(','))
+                )
+            )
           }}
 
     - name: Validate traffic Linux port allowlist type
@@ -96,8 +103,10 @@
           - traffic_linux_ports is not string
           - traffic_linux_ports | length > 0
         fail_msg: >-
-          traffic_linux_ports must be a YAML list, for example:
-          traffic_linux_ports: ["eno1", "eno2"]
+          traffic_linux_ports must resolve to a non-empty list.
+          Supported formats:
+          - ansible/inventory: traffic_linux_ports=eno1,eno2
+          - YAML vars: traffic_linux_ports: ["eno1", "eno2"]
 
     - name: Validate traffic Linux port names
       assert:
