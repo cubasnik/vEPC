@@ -47,6 +47,12 @@ add_executable(test-runtime-cli
     tests/test_runtime_cli.cpp
 )
 
+if(UNIX)
+add_executable(test-linux-interface
+    tests/test_linux_interface.cpp
+)
+endif()
+
 add_executable(test-s11-gtpc-client
     tests/test_s11_gtpc_client.cpp
     src/gtp_parser.cpp
@@ -65,6 +71,9 @@ add_executable(test-s6a-diameter-client
 add_test(NAME gtp-parser-smoke COMMAND test-gtp-parser)
 add_test(NAME diameter-parser-smoke COMMAND test-diameter-parser)
 add_test(NAME s1ap-parser-smoke COMMAND test-s1ap-parser)
+if(UNIX)
+add_test(NAME linux-interface-smoke COMMAND test-linux-interface)
+endif()
 add_test(
     NAME runtime-state-recovery-smoke
     COMMAND ${CMAKE_COMMAND}

@@ -12,6 +12,9 @@ services:
       - NET_ADMIN
       - SYS_PTRACE
 
+    # Run as root so CAP_NET_ADMIN is effective for iproute2 VLAN operations.
+    user: "0:0"
+
     # Required for Linux interface operations (create-vlan/bind) on host NICs.
     network_mode: host
     

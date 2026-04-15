@@ -140,7 +140,9 @@ If the container fails to start:
 
 - vEPC service runs under user: {{ vepc_user }}
 - Container capabilities: SYS_ADMIN, NET_ADMIN, SYS_PTRACE
-- Network mode: Bridge
+- Container runtime user: root (0:0)
+- Network mode: host
+- VLAN kernel module: 8021q loaded
 - IP forwarding: Enabled
 - Firewall: Configured with UFW
 

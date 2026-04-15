@@ -62,20 +62,19 @@ vepc-test ansible_host=192.168.1.101 ansible_user=ubuntu ansible_ssh_private_key
 
 ### 2. Customize Variables
 
-Edit `ansible/inventory` to customize deployment variables:
+Use `ansible/group_vars/vepc_hosts.yml` for list variables (recommended):
 
-```bash
-[vepc_hosts:vars]
-vepc_repo_url=https://github.com/your-org/vEPC.git
-vepc_repo_branch=main
-gtp_c_port=2123
-s1ap_port=36412
-diameter_port=3868
-cli_port=5555
-traffic_linux_ports='["ens160","eth1"]'
+```yaml
+traffic_linux_ports:
+  - eno1
+  - eno2
 ```
 
 `traffic_linux_ports` is required and defines Linux interfaces allowed for traffic operations (`bind`, `create-vlan`) to prevent accidental changes on management interfaces.
+
+Important:
+- Interfaces enslaved to Open vSwitch (`master ovs-system`) are rejected during deploy because VLAN sub-interfaces cannot be created on them.
+- Deployment runs the vEPC container as root (with `NET_ADMIN`) so `create-vlan` works from CLI without manual post-setup.
 
 PLMN (`MCC`/`MNC`) is no longer set via Ansible variables. Configure it from CLI:
 

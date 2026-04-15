@@ -34,8 +34,8 @@ ansible_become_method=sudo
 # Default (defined in playbook vars): single user vepccli / vepccli
 
 # Traffic ports allowlist (required): Linux interfaces allowed for bind/create-vlan traffic operations.
-# Example: traffic_linux_ports='["ens160","eth1"]'
-traffic_linux_ports='["eno2","eno3"]'
+# Configure in group_vars/vepc_hosts.yml (see comments there)
+# Default interfaces: eno1, eno2, eno3, eno4 (for this host configuration)
 
 # Force Docker image rebuild on every deploy (default: true)
 # Set to false to skip --no-cache and reuse layer cache (faster re-deploys):

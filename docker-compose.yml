@@ -13,18 +13,11 @@ services:
       - NET_ADMIN
       - SYS_PTRACE
     
-    # Privileged mode for full network access (use with caution)
-    # privileged: true
-    
-    ports:
-      # GTP-C signaling (UDP)
-      - "2123:2123/udp"
-      # S1AP (SCTP)
-      - "36412:36412/sctp"
-      # Diameter S6a (UDP)
-      - "3868:3868/udp"
-      # CLI management (TCP)
-      - "5555:5555/tcp"
+    # Run as root so NET_ADMIN is effective for iproute2 VLAN operations.
+    user: "0:0"
+
+    # Use the host network namespace for access to host NICs such as eno2.
+    network_mode: host
     
     volumes:
       # Configuration directory
@@ -66,8 +59,3 @@ services:
 volumes:
   vepc-logs:
     driver: local
-
-networks:
-  vepc-network:
-    name: vepc-network
-    driver: bridge

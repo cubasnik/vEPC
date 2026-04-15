@@ -77,8 +77,8 @@
           - traffic_linux_ports is defined
           - traffic_linux_ports | length > 0
         fail_msg: >-
-          Set traffic_linux_ports in inventory, for example:
-          traffic_linux_ports='["ens160","eth1"]'
+          Set traffic_linux_ports as YAML list in ansible/group_vars/vepc_hosts.yml,
+          for example: traffic_linux_ports: ["eno1", "eno2"]
 
     - name: Normalize traffic Linux port allowlist
       set_fact:
@@ -96,8 +96,8 @@
           - traffic_linux_ports is not string
           - traffic_linux_ports | length > 0
         fail_msg: >-
-          traffic_linux_ports must be a list, for example:
-          traffic_linux_ports='["ens160","eth1"]'
+          traffic_linux_ports must be a YAML list, for example:
+          traffic_linux_ports: ["eno1", "eno2"]
 
     - name: Validate traffic Linux port names
       assert:
@@ -112,6 +112,41 @@
           - item in ansible_interfaces
         fail_msg: "Configured traffic port '{{ item }}' not found on host interfaces: {{ ansible_interfaces | join(', ') }}"
       loop: "{{ traffic_linux_ports }}"
+
+    - name: Ensure 8021q kernel module is loaded
+      command: modprobe 8021q
+      changed_when: false
+
+    - name: Persist 8021q module across reboots
+      copy:
+        dest: /etc/modules-load.d/vepc-vlan.conf
+        mode: '0644'
+        content: |
+          8021q
+
+    - name: Collect OVS master mapping for traffic ports
+      shell: |
+        set -e
+        port={{ item }}
+        if [ -L "/sys/class/net/${port}/master" ]; then
+          basename "$(readlink -f "/sys/class/net/${port}/master")"
+        else
+          echo "none"
+        fi
+      args:
+        executable: /bin/bash
+      register: traffic_port_master
+      loop: "{{ traffic_linux_ports }}"
+      changed_when: false
+
+    - name: Validate traffic ports are not enslaved to Open vSwitch
+      assert:
+        that:
+          - item.stdout != 'ovs-system'
+        fail_msg: >-
+          traffic port '{{ item.item }}' is managed by Open vSwitch (master=ovs-system).
+          Select a free Linux NIC in traffic_linux_ports or detach this NIC from OVS before deploy.
+      loop: "{{ traffic_port_master.results }}"
 
     - name: Read existing vEPC config to preserve PLMN across redeploys
       slurp:

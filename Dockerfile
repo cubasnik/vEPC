@@ -50,12 +50,11 @@ COPY --from=builder /build/config/* /etc/vepc/
 # Change ownership
 RUN chown -R vepc:vepc /app /etc/vepc
 
-# Switch to non-root user
-USER vepc
+# Keep root as the runtime user so CAP_NET_ADMIN is effective for VLAN/bind operations.
+# The dedicated vepc user remains available for environments that do not need NIC management.
 
 # Create a health check script
-RUN mkdir -p /app/scripts && \
-    chown vepc:vepc /app/scripts
+RUN mkdir -p /app/scripts
 
 # Expose ports
 # GTP-C: 2123/UDP

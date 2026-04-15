@@ -66,11 +66,14 @@ make -j$(nproc)
 # Build Docker image locally
 docker build -t vepc:latest .
 
-# Run with docker-compose
-docker-compose up -d vepc
+# Run with docker compose (starts with root + NET_ADMIN for VLAN operations)
+docker compose up -d vepc
 
 # Access CLI
 docker exec -it vepc-mme-sgsn /app/vepc-cli
+
+# If you run the container manually, keep NET_ADMIN and host networking enabled
+# docker run --rm --name vepc --cap-add NET_ADMIN --network host --user root vepc:latest
 ```
 
 ### Ansible Deployment (Production)
