@@ -4,9 +4,9 @@
 [vepc_hosts]
 # Define your target hosts here
 # Examples:
-# vepc-prod ansible_host=192.168.1.34 ansible_user=root traffic_linux_ports=eno1,eno2
+# vepc-prod ansible_host=192.168.1.34 ansible_user=root traffic_linux_ports=eno1
 # vepc-test ansible_host=192.168.1.101 ansible_user=ubuntu traffic_linux_ports=eth1,eth2
-vepc-prod ansible_host=192.168.1.34 ansible_user=root traffic_linux_ports=eno1,eno2
+vepc-prod ansible_host=192.168.1.34 ansible_user=root traffic_linux_ports=eno1
 
 # Localhost deployment (for testing)
 #localhost ansible_connection=local ansible_become_password_file=/tmp/sudo_pass
@@ -33,11 +33,12 @@ ansible_become_method=sudo
 # cli_users='[{"name":"vepccli","password":"vepccli"},{"name":"admin","password":"Admin123"}]'
 # Default (defined in playbook vars): single user vepccli / vepccli
 
-# Traffic ports allowlist (required): Linux interfaces allowed for bind/create-vlan traffic operations.
-# You can set it per host above, for example:
-# vepc-prod ansible_host=192.168.1.34 ansible_user=root traffic_linux_ports=eno1,eno2
-# Or set a group default here:
-traffic_linux_ports=eno1,eno2
+# Traffic ports allowlist: set only free Linux NICs for bind/create-vlan traffic operations.
+# Do not choose interfaces already attached to Open vSwitch, for example eno2 if it appears in ovs-vsctl show.
+# Preferred per-host format:
+# vepc-prod ansible_host=192.168.1.34 ansible_user=root traffic_linux_ports=eno1,eno3
+# Optional group default format:
+# traffic_linux_ports=eno1,eno3
 
 # Force Docker image rebuild on every deploy (default: true)
 # Set to false to skip --no-cache and reuse layer cache (faster re-deploys):

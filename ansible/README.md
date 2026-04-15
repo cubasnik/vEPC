@@ -81,6 +81,7 @@ traffic_linux_ports:
 `traffic_linux_ports` is required and defines Linux interfaces allowed for traffic operations (`bind`, `create-vlan`) to prevent accidental changes on management interfaces. Supported formats are a comma-separated inventory value like `traffic_linux_ports=eno1,eno2` or a YAML list.
 
 Important:
+- If a NIC appears under `ovs-vsctl show`, it is already attached to Open vSwitch and will be rejected during deploy. Select a free NIC instead, or detach it from OVS first.
 - Interfaces enslaved to Open vSwitch (`master ovs-system`) are rejected during deploy because VLAN sub-interfaces cannot be created on them.
 - Deployment runs the vEPC container as root (with `NET_ADMIN`) so `create-vlan` works from CLI without manual post-setup.
 
