@@ -75,6 +75,7 @@ struct Interface {
     std::string desc;
 };
 static std::vector<Interface> g_ifaces;
+static std::map<std::string, int> g_virtualIpPrefixes;
 static std::string g_cliHostname = "vepc";
 static bool g_suppressPromptOutput = false;
 
@@ -1265,6 +1266,7 @@ static void printServerResponse(const std::string& response, const std::string& 
 
 static void loadInterfaces() {
     g_ifaces.clear();
+    g_virtualIpPrefixes.clear();
     const std::string primary = resolveInterfacesConfPath();
     std::ifstream f(primary);
     if (!f.is_open()) {
@@ -1299,6 +1301,14 @@ static void loadInterfaces() {
             cur.ip   = addr;
             cur.port = "";
         }
+
+        std::string normalizedIp;
+        int prefix = 32;
+        if (parseIpv4WithOptionalPrefix(cur.ip, normalizedIp, prefix)) {
+            cur.ip = normalizedIp;
+            g_virtualIpPrefixes[cur.name] = prefix;
+        }
+
         g_ifaces.push_back(cur);
     }
 }
@@ -2820,15 +2830,18 @@ int main() {
 
         if (mode == CliMode::InterfaceConfig) {
             const std::string head = tokens.empty() ? "" : toLowerCopy(tokens[0]);
-            if (head == "shutdown") {
+            if (head == "shutdown" || head == "shut") {
                 sendToServer("iface_down " + selectedInterface);
                 printPrompt(promptForMode(mode, selectedInterface));
                 continue;
             }
-            if (tokens.size() == 2 && head == "no" && toLowerCopy(tokens[1]) == "shutdown") {
-                sendToServer("iface_up " + selectedInterface);
-                printPrompt(promptForMode(mode, selectedInterface));
-                continue;
+            if (tokens.size() == 2 && head == "no") {
+                const std::string action = toLowerCopy(tokens[1]);
+                if (action == "shutdown" || action == "shut") {
+                    sendToServer("iface_up " + selectedInterface);
+                    printPrompt(promptForMode(mode, selectedInterface));
+                    continue;
+                }
             }
             if (head == "ip" && tokens.size() >= 2 && toLowerCopy(tokens[1]) == "address") {
                 std::string virtualIp;
@@ -2847,6 +2860,7 @@ int main() {
                 }
 
                 g_ifaces[idx].ip = virtualIp;
+                g_virtualIpPrefixes[selectedInterface] = prefix;
                 if (!saveInterfaces()) {
                     printLocalWarning("Virtual IP applied at runtime, but interfaces.conf is not writable by current user.");
                 } else {
@@ -2872,6 +2886,7 @@ int main() {
                 }
 
                 g_ifaces[idx].ip = "0.0.0.0";
+                g_virtualIpPrefixes[selectedInterface] = 32;
                 if (!saveInterfaces()) {
                     printLocalWarning("Virtual IP reset applied at runtime, but interfaces.conf is not writable by current user.");
                 } else {
@@ -2913,11 +2928,17 @@ int main() {
 
                 std::string virtualIp = g_ifaces[idx].ip;
                 int prefix = 32;
+                const auto prefixIt = g_virtualIpPrefixes.find(selectedInterface);
+                if (prefixIt != g_virtualIpPrefixes.end()) {
+                    prefix = prefixIt->second;
+                }
                 std::string ipOnly;
                 int parsedPrefix = 32;
                 if (parseIpv4WithOptionalPrefix(virtualIp, ipOnly, parsedPrefix)) {
                     virtualIp = ipOnly;
-                    prefix = parsedPrefix;
+                    if (prefixIt == g_virtualIpPrefixes.end()) {
+                        prefix = parsedPrefix;
+                    }
                 }
                 if (!parseIpv4Token(virtualIp)) {
                     printLocalError("Set virtual IP first: ip address <ip[/prefix]>");

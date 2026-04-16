@@ -210,11 +210,37 @@ static std::filesystem::path resolveProjectRelativePath(const std::string& fileP
     return relativePath;
 }
 
+static std::string resolveConfigEnvPath(const std::string& filePath) {
+    const char* configPath = std::getenv("CONFIG_PATH");
+    if (!configPath || !*configPath) {
+        return "";
+    }
+
+    constexpr const char* kConfigPrefix = "config/";
+    if (filePath.rfind(kConfigPrefix, 0) != 0) {
+        return "";
+    }
+
+    const auto resolved = (std::filesystem::path(configPath) / filePath.substr(std::strlen(kConfigPrefix))).lexically_normal();
+    return resolved.string();
+}
+
 static std::string resolveConfigPath(const std::string& filePath) {
+    const std::string envPath = resolveConfigEnvPath(filePath);
+    if (!envPath.empty()) {
+        std::error_code ec;
+        if (std::filesystem::exists(envPath, ec)) {
+            return envPath;
+        }
+    }
     return resolveProjectRelativePath(filePath, true).string();
 }
 
 static std::string resolveWritableConfigPath(const std::string& filePath) {
+    const std::string envPath = resolveConfigEnvPath(filePath);
+    if (!envPath.empty()) {
+        return envPath;
+    }
     return resolveProjectRelativePath(filePath, false).string();
 }
 
