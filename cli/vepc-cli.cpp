@@ -1771,16 +1771,16 @@ static void handleListInterfaces(const std::vector<std::string>& tokens) {
         return;
     }
 
-    auto interfaces = listAllInterfaces();
+    auto interfaces = hostNetSysfsAvailable() ? listHostInterfacesFromSysfs() : listAllInterfaces();
     if (interfaces.empty()) {
         printLocalWarning("No interfaces found");
         return;
     }
-    
+
     printLocalBanner("System Interfaces", "");
     for (const auto& iface : interfaces) {
-        std::string status = isInterfaceUp(iface) ? "UP" : "DOWN";
-        std::string ip = getInterfaceIp(iface);
+        const std::string status = hostInterfaceState(iface);
+        const std::string ip = getInterfaceIp(iface);
         std::cout << GRN << std::left << std::setw(20) << iface << RST
                   << semanticColor(status) << std::setw(10) << status << RST
                   << (ip.empty() ? "N/A" : ip) << "\n";

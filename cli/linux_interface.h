@@ -119,7 +119,6 @@ inline bool createVlanInterface(const std::string& parent, int vlan_id) {
         return false;
     }
 
-    std::cout << "Interface " << subif_name << " created successfully\n";
     return true;
 }
 
@@ -142,7 +141,6 @@ inline bool deleteInterface(const std::string& iface_name) {
         std::cerr << "Error: Failed to delete interface " << iface_name << "\n";
         return false;
     }
-    std::cout << "Interface " << iface_name << " deleted successfully\n";
     return true;
 }
 
@@ -166,7 +164,6 @@ inline bool setInterfaceIp(const std::string& iface_name, const std::string& ip)
         std::cerr << "Error: Failed to set IP for interface " << iface_name << "\n";
         return false;
     }
-    std::cout << "IP " << ip << " assigned to interface " << iface_name << "\n";
     return true;
 }
 
@@ -189,7 +186,6 @@ inline bool bringUpInterface(const std::string& iface_name) {
         std::cerr << "Error: Failed to bring up interface " << iface_name << "\n";
         return false;
     }
-    std::cout << "Interface " << iface_name << " is now up\n";
     return true;
 }
 
@@ -212,7 +208,6 @@ inline bool bringDownInterface(const std::string& iface_name) {
         std::cerr << "Error: Failed to bring down interface " << iface_name << "\n";
         return false;
     }
-    std::cout << "Interface " << iface_name << " is now down\n";
     return true;
 }
 
@@ -222,7 +217,10 @@ inline bool bringDownInterface(const std::string& iface_name) {
  * @return true если интерфейс UP, false если DOWN
  */
 inline bool isInterfaceUp(const std::string& iface_name) {
-    std::string cmd = "ip link show " + iface_name + " | grep -q UP";
+    if (!isValidLinuxInterfaceName(iface_name)) {
+        return false;
+    }
+    std::string cmd = "ip link show dev " + iface_name + " 2>/dev/null | grep -q UP";
     return system(cmd.c_str()) == 0;
 }
 
@@ -232,18 +230,21 @@ inline bool isInterfaceUp(const std::string& iface_name) {
  * @return IP адрес или пустая строка если нет
  */
 inline std::string getInterfaceIp(const std::string& iface_name) {
-    std::string cmd = "ip addr show " + iface_name + " | grep 'inet ' | awk '{print $2}' | head -1";
+    if (!isValidLinuxInterfaceName(iface_name)) {
+        return "";
+    }
+
+    std::string cmd = "ip -o -4 addr show dev " + iface_name + " 2>/dev/null | awk '{print $4}' | head -1";
     FILE* pipe = popen(cmd.c_str(), "r");
     if (!pipe) return "";
-    
+
     char buffer[256];
     std::string result;
     while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
         result += buffer;
     }
     pclose(pipe);
-    
-    // Remove trailing newline
+
     if (!result.empty() && result.back() == '\n') {
         result.pop_back();
     }
@@ -256,16 +257,22 @@ inline std::string getInterfaceIp(const std::string& iface_name) {
  */
 inline std::vector<std::string> listAllInterfaces() {
     std::vector<std::string> interfaces;
-    FILE* pipe = popen("ip link show | grep '^[0-9]' | awk '{print $2}' | tr -d ':'", "r");
+    FILE* pipe = popen("ip -o link show 2>/dev/null | awk -F': ' '{print $2}'", "r");
     if (!pipe) return interfaces;
-    
+
     char buffer[256];
     while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
         std::string line(buffer);
         if (!line.empty() && line.back() == '\n') {
             line.pop_back();
         }
-        if (!line.empty()) {
+
+        const size_t aliasPos = line.find('@');
+        if (aliasPos != std::string::npos) {
+            line = line.substr(0, aliasPos);
+        }
+
+        if (!line.empty() && std::find(interfaces.begin(), interfaces.end(), line) == interfaces.end()) {
             interfaces.push_back(line);
         }
     }
