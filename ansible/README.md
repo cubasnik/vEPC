@@ -81,9 +81,10 @@ traffic_linux_ports:
 `traffic_linux_ports` is required and defines Linux interfaces allowed for traffic operations (`bind`, `create-vlan`) to prevent accidental changes on management interfaces. Supported formats are a comma-separated inventory value like `traffic_linux_ports=eno1,eno2` or a YAML list.
 
 Important:
+- Default deployment mode is now a native Linux systemd service (`vepc_deploy_mode: systemd`).
 - If a NIC appears under `ovs-vsctl show`, it is already attached to Open vSwitch and will be rejected during deploy. Select a free NIC instead, or detach it from OVS first.
 - Interfaces enslaved to Open vSwitch (`master ovs-system`) are rejected during deploy because VLAN sub-interfaces cannot be created on them.
-- Deployment runs the vEPC container as root (with `NET_ADMIN`) so `create-vlan` works from CLI without manual post-setup.
+- The service runs on the host and keeps direct access to Linux NIC/VLAN operations for CLI management.
 
 PLMN (`MCC`/`MNC`) is no longer set via Ansible variables. Configure it from CLI:
 
@@ -132,27 +133,27 @@ ansible-playbook -i ansible/inventory vepc-deploy.yml -K
 
 ## Post-Deployment Verification
 
-### Check Container Status
+### Check Service Status
 
 ```bash
 # SSH to target machine
 ssh ubuntu@target-host-ip
 
-# Check if container is running
-docker ps | grep vepc
-
-# View container logs
-docker logs -f vepc-mme-sgsn
-
-# Check service status
+# Check native service status
 sudo systemctl status vepc
+
+# View service logs
+sudo journalctl -u vepc -f
 ```
 
 ### Verify Service Functionality
 
 ```bash
-# Access CLI
-docker exec -it vepc-mme-sgsn /app/vepc-cli
+# Access CLI directly on the host
+/opt/vepc/build/vepc-cli
+
+# Or run a quick health check
+/opt/vepc/build/vepc-cli status
 
 # Inside CLI, run:
 vepc# show status
@@ -185,17 +186,17 @@ ansible -i ansible/inventory vepc_hosts -m ping
 ansible-playbook -i ansible/inventory vepc-deploy.yml -vvv -e "ansible_user=ubuntu"
 ```
 
-### Docker Issues
+### Service Issues
 
 ```bash
-# Check Docker service
-sudo systemctl status docker
+# Check vEPC service
+sudo systemctl status vepc
 
-# Restart Docker
-sudo systemctl restart docker
+# Restart vEPC
+sudo systemctl restart vepc
 
-# View Docker daemon logs
-sudo journalctl -u docker -f
+# View service logs
+sudo journalctl -u vepc -f
 ```
 
 ### Port Conflicts
@@ -208,14 +209,14 @@ sudo lsof -i :2123,36412,3868,5555
 sudo netstat -tlnup | grep LISTEN
 ```
 
-### Container Fails to Start
+### Service Fails to Start
 
 ```bash
 # View detailed logs
-docker logs vepc-mme-sgsn
+sudo journalctl -u vepc -n 200 --no-pager
 
-# Inspect container
-docker inspect vepc-mme-sgsn
+# Check the unit configuration
+sudo systemctl cat vepc
 
 # Check available disk space
 df -h

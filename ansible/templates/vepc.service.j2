@@ -1,39 +1,32 @@
 [Unit]
 Description=vEPC - Evolved Packet Core Emulator
-After=docker.service
-Requires=docker.service
-Documentation=https://github.com/your-org/vEPC
+After=network-online.target
+Wants=network-online.target
+Documentation=https://github.com/cubasnik/vEPC
 
 [Service]
-Type=exec
-User={{ vepc_user }}
-Group={{ vepc_group }}
+Type=simple
+User=root
+Group=root
 WorkingDirectory={{ vepc_repo_path }}
+Environment=CONFIG_PATH={{ config_path }}
+Environment=VEPC_TRAFFIC_PORTS={{ traffic_linux_ports | join(',') }}
+Environment=HOST_SYS_CLASS_NET=/sys/class/net
+UMask=0000
 
-# Start the container using docker-compose
-ExecStart=/usr/bin/docker-compose -f {{ vepc_repo_path }}/docker-compose.yml up
+ExecStartPre=/usr/bin/mkdir -p {{ log_path }} {{ config_path }}
+ExecStartPre=/usr/bin/rm -f /tmp/vepc.sock
+ExecStart={{ build_path }}/vepc --config={{ config_path }}
+ExecStopPost=/usr/bin/rm -f /tmp/vepc.sock
 
-# Stop the container
-ExecStop=/usr/bin/docker-compose -f {{ vepc_repo_path }}/docker-compose.yml down
-
-# Restart policy
 Restart=on-failure
-RestartSec=10
-
-# Resource limits
-MemoryLimit=2G
-CPUQuota=80%
-
-# Network configuration
-Network=host
-
-# Security settings
-PrivateTmp=yes
+RestartSec=5
+LimitNOFILE=65535
 NoNewPrivileges=no
+PrivateTmp=yes
 ProtectSystem=false
 ProtectHome=no
 
-# Logging
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=vepc

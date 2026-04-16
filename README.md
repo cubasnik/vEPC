@@ -29,7 +29,8 @@ A comprehensive mobile network EPC emulator supporting MME and SGSN cores in a s
 
 ### Deployment Options
 - **Standalone Executable**: Direct native compilation
-- **Docker Container**: Multi-stage build for minimal footprint
+- **Linux Systemd Service**: Recommended for host-network debugging and NIC/VLAN work
+- **Docker Container**: Optional multi-stage build for later packaging
 - **Docker Compose**: Local development and testing
 - **Ansible Playbook**: Automated Ubuntu 22.04+ deployment
 
@@ -60,7 +61,7 @@ make -j$(nproc)
 ./vepc-cli
 ```
 
-### Docker Deployment (Recommended)
+### Docker Deployment (Optional)
 
 ```bash
 # Build Docker image locally
@@ -76,7 +77,7 @@ docker exec -it vepc-mme-sgsn /app/vepc-cli
 # docker run --rm --name vepc --cap-add NET_ADMIN --network host --user root vepc:latest
 ```
 
-### Ansible Deployment (Production)
+### Ansible Deployment (Production Linux Service)
 
 ```bash
 # Configure target hosts
@@ -86,7 +87,7 @@ vim ansible/inventory
 ansible-playbook -i ansible/inventory ansible/vepc-deploy.yml
 
 # Verify deployment
-ansible vepc_hosts -m command -a "docker ps"
+ansible vepc_hosts -m command -a "systemctl status vepc --no-pager"
 ```
 
 ## 📋 CLI Usage Examples
