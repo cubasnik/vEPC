@@ -78,6 +78,11 @@ static std::vector<Interface> g_ifaces;
 static std::string g_cliHostname = "vepc";
 static bool g_suppressPromptOutput = false;
 
+#ifndef _WIN32
+static bool isNumericToken(const std::string& value);
+static void printArgumentError(const std::string& command, int argumentIndex, const std::string& actualValue, const std::string& expected, const std::string& usage = "");
+#endif
+
 static int dottedMaskToPrefix(const std::string& mask);
 static bool parseIpv4Token(const std::string& value);
 static bool parseIpv4WithOptionalPrefix(const std::string& token, std::string& ipOut, int& prefixOut);
