@@ -9,6 +9,7 @@
 #include <iomanip>
 #include <fstream>
 #include <algorithm>
+#include <cctype>
 #include <functional>
 #include <map>
 #include <set>
@@ -436,33 +437,43 @@ static bool isLocalInterfaceAddress(const std::string& ip, const std::map<std::s
     return false;
 }
 
+static std::string normalizeProtocolLabel(const std::string& proto) {
+    std::string normalized = trimCopy(proto);
+    std::transform(normalized.begin(), normalized.end(), normalized.begin(),
+                   [](unsigned char ch) { return static_cast<char>(std::toupper(ch)); });
+    return normalized;
+}
+
 static std::string makeEndpointKey(const InterfaceConfigEntry& entry) {
-    return entry.proto + "|" + entry.ip + "|" + entry.port;
+    return normalizeProtocolLabel(entry.proto) + "|" + entry.ip + "|" + entry.port;
 }
 
 static bool isConnectionOrientedProtocol(const InterfaceConfigEntry& entry) {
-    return entry.proto == "TCP" || entry.proto == "DIAMETER";
+    const std::string proto = normalizeProtocolLabel(entry.proto);
+    return proto == "TCP" || proto == "DIAMETER" || proto == "SCTP" || proto == "S1AP";
 }
 
 static bool isGenericEndpointProtocol(const InterfaceConfigEntry& entry, const std::map<std::string, std::string>& config) {
-    if (entry.proto == "TCP" || entry.proto == "DIAMETER" || entry.proto == "NS") {
+    const std::string proto = normalizeProtocolLabel(entry.proto);
+    if (proto == "TCP" || proto == "DIAMETER" || proto == "NS") {
         return true;
     }
 
     const auto gtpUserPortIt = config.find("gtp-u-port");
-    if (entry.proto == "UDP" && gtpUserPortIt != config.end() && entry.port == gtpUserPortIt->second) {
+    if ((proto == "UDP" || proto == "GTP-U") && gtpUserPortIt != config.end() && entry.port == gtpUserPortIt->second) {
         return true;
     }
     const auto s11PortIt = config.find("s11-port");
-    if (entry.name == "S11" && entry.proto == "UDP" && s11PortIt != config.end() && entry.port == s11PortIt->second) {
+    if (entry.name == "S11" && (proto == "UDP" || proto == "GTP-C") && s11PortIt != config.end() && entry.port == s11PortIt->second) {
         return true;
     }
     return false;
 }
 
 static std::string resolveInterfaceBindIp(const InterfaceConfigEntry& entry, const std::map<std::string, std::string>& config) {
+    const std::string proto = normalizeProtocolLabel(entry.proto);
     const auto gtpUserPortIt = config.find("gtp-u-port");
-    if (gtpUserPortIt != config.end() && entry.proto == "UDP" && entry.port == gtpUserPortIt->second) {
+    if (gtpUserPortIt != config.end() && (proto == "UDP" || proto == "GTP-U") && entry.port == gtpUserPortIt->second) {
         const auto bindIpIt = config.find("gn-gtp-u-bind-ip");
         if (bindIpIt != config.end() && !bindIpIt->second.empty()) {
             return bindIpIt->second;
@@ -473,7 +484,7 @@ static std::string resolveInterfaceBindIp(const InterfaceConfigEntry& entry, con
         }
     }
     const auto s11PortIt = config.find("s11-port");
-    if (entry.name == "S11" && s11PortIt != config.end() && entry.proto == "UDP" && entry.port == s11PortIt->second) {
+    if (entry.name == "S11" && s11PortIt != config.end() && (proto == "UDP" || proto == "GTP-C") && entry.port == s11PortIt->second) {
         const auto bindIpIt = config.find("s11-bind-ip");
         if (bindIpIt != config.end() && !bindIpIt->second.empty()) {
             return bindIpIt->second;
@@ -2415,15 +2426,16 @@ InterfaceDiagnostics VNodeController::buildInterfaceDiagnostics(const InterfaceC
     const auto s1apPortIt = config.find("s1ap-port");
     const auto gtpControlPortIt = config.find("gtp-c-port");
     const auto gtpUserPortIt = config.find("gtp-u-port");
+    const std::string proto = normalizeProtocolLabel(entry.proto);
     const bool connectionOriented = isConnectionOrientedProtocol(entry);
-    const bool isS1ap = s1apPortIt != config.end() && entry.proto == "SCTP" && entry.port == s1apPortIt->second;
+    const bool isS1ap = s1apPortIt != config.end() && (proto == "SCTP" || proto == "S1AP") && entry.port == s1apPortIt->second;
     const bool isGenericProtocol = isGenericEndpointProtocol(entry, config);
     const bool genericOwnsGtpControl = entry.name == "S11" && isGenericProtocol;
     const bool isGtpControl = gtpControlPortIt != config.end()
-        && entry.proto == "UDP"
+        && (proto == "UDP" || proto == "GTP-C")
         && entry.port == gtpControlPortIt->second
         && !genericOwnsGtpControl;
-    const bool isGtpUser = gtpUserPortIt != config.end() && entry.proto == "UDP" && entry.port == gtpUserPortIt->second;
+    const bool isGtpUser = gtpUserPortIt != config.end() && (proto == "UDP" || proto == "GTP-U") && entry.port == gtpUserPortIt->second;
     const InterfaceEndpointRuntime endpointRuntime = getInterfaceEndpointState(entry);
 
     if (!diagnostics.adminUp) {

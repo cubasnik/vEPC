@@ -29,6 +29,33 @@ int main() {
         std::cerr << "Expected resolveWritableConfigPath to honor CONFIG_PATH for vepc.config\n";
         return 1;
     }
+
+    std::map<std::string, std::string> config;
+    config["s1ap-port"] = "36412";
+    config["gtp-c-port"] = "2123";
+    config["gtp-u-port"] = "2152";
+    config["s11-port"] = "2123";
+
+    InterfaceConfigEntry s1ap{"S1-MME", "S1AP", "10.0.0.1:36412", "10.0.0.1", "36412", "eNodeB"};
+    InterfaceConfigEntry diameter{"S6a", "Diameter", "10.0.0.2:3868", "10.0.0.2", "3868", "HSS"};
+    InterfaceConfigEntry gtpc{"S11", "GTP-C", "10.0.0.3:2123", "10.0.0.3", "2123", "S-GW"};
+
+    if (!isConnectionOrientedProtocol(s1ap)) {
+        std::cerr << "Expected S1AP to be treated as connection-oriented\n";
+        return 1;
+    }
+    if (!isConnectionOrientedProtocol(diameter)) {
+        std::cerr << "Expected Diameter to be treated as connection-oriented\n";
+        return 1;
+    }
+    if (!isGenericEndpointProtocol(diameter, config)) {
+        std::cerr << "Expected Diameter alias to be treated as a generic endpoint\n";
+        return 1;
+    }
+    if (!isGenericEndpointProtocol(gtpc, config)) {
+        std::cerr << "Expected GTP-C alias to be treated as a generic endpoint\n";
+        return 1;
+    }
 #endif
 
     return 0;
