@@ -1625,6 +1625,48 @@ static void handleCreateVlanInterface(const std::vector<std::string>& tokens) {
     }
 }
 
+static void handleDeleteVlanInterface(const std::vector<std::string>& tokens) {
+    if (tokens.size() != 3) {
+        if (tokens.size() >= 3 && isNumericToken(tokens[1]) && isValidLinuxInterfaceName(tokens[2])) {
+            printLocalError("Argument order error: argument 1 must be <parent-interface>, argument 2 must be <vlan-id>. Example: delete-vlan eno3 100");
+        } else {
+            printLocalError("Usage: delete-vlan <parent-interface> <vlan-id>");
+        }
+        return;
+    }
+
+    const std::string parent = tokens[1];
+    const std::string vlan_str = tokens[2];
+    if (!isValidLinuxInterfaceName(parent) || !hostInterfaceExists(parent)) {
+        printArgumentError("delete-vlan", 1, parent, "an existing Linux interface from the allowed traffic ports: " + trafficPortsHint(), "delete-vlan <parent-interface> <vlan-id>");
+        return;
+    }
+    if (!isTrafficPortAllowed(parent)) {
+        printArgumentError("delete-vlan", 1, parent, "one of the allowed traffic ports: " + trafficPortsHint(), "delete-vlan <parent-interface> <vlan-id>");
+        return;
+    }
+    if (!isNumericToken(vlan_str)) {
+        printArgumentError("delete-vlan", 2, vlan_str, "a VLAN ID in range 1-4094", "delete-vlan <parent-interface> <vlan-id>");
+        return;
+    }
+
+    const int vlan_id = std::stoi(vlan_str);
+    if (vlan_id < 1 || vlan_id > 4094) {
+        printArgumentError("delete-vlan", 2, vlan_str, "a VLAN ID in range 1-4094", "delete-vlan <parent-interface> <vlan-id>");
+        return;
+    }
+
+    const std::string subif_name = parent + "." + std::to_string(vlan_id);
+    if (!hostInterfaceExists(subif_name)) {
+        printArgumentError("delete-vlan", 2, vlan_str, "an existing VLAN on " + parent, "delete-vlan <parent-interface> <vlan-id>");
+        return;
+    }
+
+    if (deleteInterface(subif_name)) {
+        printLocalInfo("VLAN interface " + subif_name + " deleted successfully");
+    }
+}
+
 /**
  * Delete a Linux interface
  * Usage: delete-interface eth0.100
@@ -1773,6 +1815,7 @@ static void printExecHelp() {
         {"Navigation", "configure terminal | exit"},
         {"Show", "show running-config | show logging | show interface [<name> [detail]] | show ports | show about"},
         {"Runtime", "status | state | restart | stop | save"},
+        {"Linux", "create-vlan <parent> <vlan-id> | delete-vlan <parent> <vlan-id> | delete-interface <name>"},
         {"Info", "about"},
         {"Config", "set <key> <value>"},
         {"Help", "help | ?"}
@@ -1786,6 +1829,7 @@ static void printConfigHelp() {
         {"Runtime", "restart | stop"},
         {"Config", "set <key> <value> | hostname <name> | plmn <mcc> <mnc> | commit"},
         {"Show", "show running-config | show logging | show interface [<name> [detail]] | show ports | show about"},
+        {"Linux", "create-vlan <parent> <vlan-id> | delete-vlan <parent> <vlan-id> | delete-interface <name>"},
         {"Info", "about"},
         {"Help", "help | ?"}
     });
@@ -1943,7 +1987,7 @@ static void printArgumentError(
     int argumentIndex,
     const std::string& actualValue,
     const std::string& expected,
-    const std::string& usage = ""
+    const std::string& usage
 ) {
     std::ostringstream oss;
     oss << "Invalid argument " << argumentIndex << " for " << command;
@@ -1986,6 +2030,7 @@ static std::vector<std::string> firstWordCommandsForMode(CliMode mode) {
 #ifndef _WIN32
     if (mode == CliMode::Exec || mode == CliMode::Config) {
         out.push_back("create-vlan");
+        out.push_back("delete-vlan");
         out.push_back("delete-interface");
         out.push_back("up-interface");
         out.push_back("down-interface");
@@ -2050,9 +2095,9 @@ static std::vector<std::string> completionCandidates(
         } else {
             candidates = {"0.0.0.0", "127.0.0.1"};
         }
-    } else if ((t0 == "create-vlan") && tokenIndex == 1) {
+    } else if ((t0 == "create-vlan" || t0 == "delete-vlan") && tokenIndex == 1) {
         candidates = linuxInterfaceCandidates(true, true);
-    } else if ((t0 == "create-vlan") && tokenIndex == 2) {
+    } else if ((t0 == "create-vlan" || t0 == "delete-vlan") && tokenIndex == 2) {
         candidates = suggestVlanIds(tokens.size() > 1 ? tokens[1] : "");
     } else if ((t0 == "delete-interface" || t0 == "up-interface" || t0 == "down-interface" || t0 == "set-ip") && tokenIndex == 1) {
         candidates = linuxInterfaceCandidates(false, false);
@@ -2431,7 +2476,8 @@ static void printModeHint() {
     printLocalInfo("Structured mode commands: configure terminal | interface <name> | hostname <name> | plmn <mcc> <mnc> | shutdown | no shutdown | ip address <ip[/prefix]> | bind <linux-iface> | end");
     printLocalInfo("Cisco-style commands: show [running-config | interface | ports | status | logging | about] | about");
 #ifndef _WIN32
-    printLocalInfo("Linux interface commands: create-vlan <parent> <vlan-id> | delete-interface <name>");
+    printLocalInfo("Linux interface commands: create-vlan <parent> <vlan-id> | delete-vlan <parent> <vlan-id>");
+    printLocalInfo("                          delete-interface <name>");
     printLocalInfo("                          up-interface <name> | down-interface <name> | set-ip <name> <ip/prefix>");
     printLocalInfo("                          list-interfaces");
 #endif
@@ -2633,6 +2679,12 @@ int main() {
             
             if (cmd == "create-vlan") {
                 handleCreateVlanInterface(tokens);
+                printPrompt(promptForMode(mode, selectedInterface));
+                continue;
+            }
+
+            if (cmd == "delete-vlan") {
+                handleDeleteVlanInterface(tokens);
                 printPrompt(promptForMode(mode, selectedInterface));
                 continue;
             }

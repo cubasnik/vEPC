@@ -41,6 +41,18 @@ int main() {
         return 1;
     }
 
+    const auto deleteVlanPorts = completionCandidates(CliMode::Exec, "delete-vlan ", "");
+    if (!contains(deleteVlanPorts, "eno3") || !contains(deleteVlanPorts, "eno4")) {
+        std::cerr << "Expected delete-vlan completion to suggest allowed traffic interfaces\n";
+        return 1;
+    }
+
+    const auto deleteVlanIds = completionCandidates(CliMode::Exec, "delete-vlan eno3 ", "");
+    if (deleteVlanIds.empty() || !containsDigitSuggestion(deleteVlanIds)) {
+        std::cerr << "Expected delete-vlan completion to suggest VLAN IDs\n";
+        return 1;
+    }
+
     const auto hostnameHints = completionCandidates(CliMode::Config, "hostname ", "");
     if (hostnameHints.empty()) {
         std::cerr << "Expected hostname completion to provide an example value\n";

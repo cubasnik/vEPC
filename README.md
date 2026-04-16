@@ -116,6 +116,7 @@ vepc(config)# end                    # Return to exec mode
 
 ```bash
 vepc# create-vlan eth0 100           # Create VLAN 100 on eth0
+vepc# delete-vlan eth0 100           # Delete VLAN 100 on eth0
 vepc# list-interfaces                # Show Linux interfaces
 vepc# up-interface eth0.100          # Bring up VLAN interface
 vepc# set-ip eth0.100 192.168.1.1/24 # Assign IP address
