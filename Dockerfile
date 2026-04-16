@@ -2,14 +2,23 @@
 # Stage 1: Build stage
 FROM ubuntu:22.04 AS builder
 
-# Install build dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    cmake \
-    git \
-    libreadline-dev \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+# Install build dependencies with retries to tolerate mirror sync races.
+RUN set -eux; \
+    for attempt in 1 2 3 4 5; do \
+        rm -rf /var/lib/apt/lists/*; \
+        apt-get update -o Acquire::Retries=5 -o Acquire::http::No-Cache=true -o Acquire::https::No-Cache=true && \
+        apt-get install -y --no-install-recommends \
+            build-essential \
+            cmake \
+            git \
+            libreadline-dev \
+            ca-certificates && \
+        break; \
+        echo "apt install attempt ${attempt} failed, retrying..." >&2; \
+        if [ "${attempt}" -eq 5 ]; then exit 1; fi; \
+        sleep 5; \
+    done; \
+    rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /build
@@ -25,15 +34,24 @@ RUN mkdir -p build && cd build && \
 # Stage 2: Runtime stage
 FROM ubuntu:22.04
 
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    iproute2 \
-    net-tools \
-    tcpdump \
-    curl \
-    libreadline8 \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+# Install runtime dependencies with retries to tolerate mirror sync races.
+RUN set -eux; \
+    for attempt in 1 2 3 4 5; do \
+        rm -rf /var/lib/apt/lists/*; \
+        apt-get update -o Acquire::Retries=5 -o Acquire::http::No-Cache=true -o Acquire::https::No-Cache=true && \
+        apt-get install -y --no-install-recommends \
+            iproute2 \
+            net-tools \
+            tcpdump \
+            curl \
+            libreadline8 \
+            ca-certificates && \
+        break; \
+        echo "apt install attempt ${attempt} failed, retrying..." >&2; \
+        if [ "${attempt}" -eq 5 ]; then exit 1; fi; \
+        sleep 5; \
+    done; \
+    rm -rf /var/lib/apt/lists/*
 
 # Create non-root user
 RUN useradd -m -u 1000 vepc && \
