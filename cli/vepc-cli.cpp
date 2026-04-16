@@ -871,6 +871,9 @@ static bool hostInterfaceExists(const std::string& iface) {
 }
 
 static std::string hostInterfaceState(const std::string& iface) {
+    if (!hostInterfaceExists(iface)) {
+        return "NOT FOUND";
+    }
     if (hostNetSysfsAvailable()) {
         const std::string state = toUpperCopy(readFirstLineFromFile(hostNetSysfsRoot() + "/" + iface + "/operstate"));
         if (state == "UP") {
@@ -1771,13 +1774,33 @@ static void handleListInterfaces(const std::vector<std::string>& tokens) {
         return;
     }
 
-    auto interfaces = hostNetSysfsAvailable() ? listHostInterfacesFromSysfs() : listAllInterfaces();
-    if (interfaces.empty()) {
-        printLocalWarning("No interfaces found");
+    const auto allowed = configuredTrafficPorts();
+    if (allowed.empty()) {
+        printLocalWarning("No traffic interfaces configured. Set VEPC_TRAFFIC_PORTS via Ansible traffic_linux_ports.");
         return;
     }
 
-    printLocalBanner("System Interfaces", "");
+    const auto all = hostNetSysfsAvailable() ? listHostInterfacesFromSysfs() : listAllInterfaces();
+    std::vector<std::string> interfaces;
+
+    for (const auto& port : allowed) {
+        if (!port.empty()) {
+            interfaces.push_back(port);
+        }
+    }
+    for (const auto& iface : all) {
+        if (isTrafficPortAllowed(iface)
+            && std::find(interfaces.begin(), interfaces.end(), iface) == interfaces.end()) {
+            interfaces.push_back(iface);
+        }
+    }
+
+    if (interfaces.empty()) {
+        printLocalWarning("No traffic interfaces found");
+        return;
+    }
+
+    printLocalBanner("Traffic Interfaces", "");
     for (const auto& iface : interfaces) {
         const std::string status = hostInterfaceState(iface);
         const std::string ip = getInterfaceIp(iface);
