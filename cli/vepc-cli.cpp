@@ -91,6 +91,7 @@ static bool parseVirtualIpCommandValue(const std::vector<std::string>& tokens, s
 static bool isSafeLinuxInterfaceName(const std::string& value);
 static std::string bindIpKeyForInterfaceName(const std::string& ifaceName);
 static std::string bindInterfaceKeyForInterfaceName(const std::string& ifaceName);
+static std::string joinSuggestions(const std::vector<std::string>& values, size_t maxItems = 10);
 
 struct InterfaceOverviewRow {
     std::string name;
