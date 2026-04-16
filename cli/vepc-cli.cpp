@@ -78,6 +78,14 @@ static std::vector<Interface> g_ifaces;
 static std::string g_cliHostname = "vepc";
 static bool g_suppressPromptOutput = false;
 
+static int dottedMaskToPrefix(const std::string& mask);
+static bool parseIpv4Token(const std::string& value);
+static bool parseIpv4WithOptionalPrefix(const std::string& token, std::string& ipOut, int& prefixOut);
+static bool parseVirtualIpCommandValue(const std::vector<std::string>& tokens, std::string& ipOut, int& prefixOut);
+static bool isSafeLinuxInterfaceName(const std::string& value);
+static std::string bindIpKeyForInterfaceName(const std::string& ifaceName);
+static std::string bindInterfaceKeyForInterfaceName(const std::string& ifaceName);
+
 struct InterfaceOverviewRow {
     std::string name;
     std::string proto;
@@ -1581,26 +1589,39 @@ static void sendToServer(const std::string& cmd) {
  * Usage: create-vlan eth0 100
  */
 static void handleCreateVlanInterface(const std::vector<std::string>& tokens) {
-    if (tokens.size() < 3) {
-        printLocalError("Usage: create-vlan <parent-interface> <vlan-id>");
-        return;
-    }
-    
-    std::string parent = tokens[1];
-    std::string vlan_str = tokens[2];
-
-    if (!isTrafficPortAllowed(parent)) {
-        printLocalError("VLAN is allowed only on traffic ports. Allowed: " + trafficPortsHint());
-        return;
-    }
-    
-    try {
-        int vlan_id = std::stoi(vlan_str);
-        if (createVlanInterface(parent, vlan_id)) {
-            printLocalInfo("VLAN interface " + parent + "." + std::to_string(vlan_id) + " created successfully");
+    if (tokens.size() != 3) {
+        if (tokens.size() >= 3 && isNumericToken(tokens[1]) && isValidLinuxInterfaceName(tokens[2])) {
+            printLocalError("Argument order error: argument 1 must be <parent-interface>, argument 2 must be <vlan-id>. Example: create-vlan eno3 100");
+        } else {
+            printLocalError("Usage: create-vlan <parent-interface> <vlan-id>");
         }
-    } catch (const std::exception& e) {
-        printLocalError("Failed to create VLAN: " + std::string(e.what()));
+        return;
+    }
+
+    const std::string parent = tokens[1];
+    const std::string vlan_str = tokens[2];
+
+    if (!isValidLinuxInterfaceName(parent) || !hostInterfaceExists(parent)) {
+        printArgumentError("create-vlan", 1, parent, "an existing Linux interface from the allowed traffic ports: " + trafficPortsHint(), "create-vlan <parent-interface> <vlan-id>");
+        return;
+    }
+    if (!isTrafficPortAllowed(parent)) {
+        printArgumentError("create-vlan", 1, parent, "one of the allowed traffic ports: " + trafficPortsHint(), "create-vlan <parent-interface> <vlan-id>");
+        return;
+    }
+    if (!isNumericToken(vlan_str)) {
+        printArgumentError("create-vlan", 2, vlan_str, "a VLAN ID in range 1-4094", "create-vlan <parent-interface> <vlan-id>");
+        return;
+    }
+
+    const int vlan_id = std::stoi(vlan_str);
+    if (vlan_id < 1 || vlan_id > 4094) {
+        printArgumentError("create-vlan", 2, vlan_str, "a VLAN ID in range 1-4094", "create-vlan <parent-interface> <vlan-id>");
+        return;
+    }
+
+    if (createVlanInterface(parent, vlan_id)) {
+        printLocalInfo("VLAN interface " + parent + "." + std::to_string(vlan_id) + " created successfully");
     }
 }
 
@@ -1609,12 +1630,16 @@ static void handleCreateVlanInterface(const std::vector<std::string>& tokens) {
  * Usage: delete-interface eth0.100
  */
 static void handleDeleteInterface(const std::vector<std::string>& tokens) {
-    if (tokens.size() < 2) {
+    if (tokens.size() != 2) {
         printLocalError("Usage: delete-interface <interface-name>");
         return;
     }
-    
-    std::string iface_name = tokens[1];
+
+    const std::string iface_name = tokens[1];
+    if (!isValidLinuxInterfaceName(iface_name) || !hostInterfaceExists(iface_name)) {
+        printArgumentError("delete-interface", 1, iface_name, "an existing Linux interface", "delete-interface <interface-name>");
+        return;
+    }
     if (deleteInterface(iface_name)) {
         printLocalInfo("Interface " + iface_name + " deleted successfully");
     }
@@ -1625,12 +1650,16 @@ static void handleDeleteInterface(const std::vector<std::string>& tokens) {
  * Usage: up-interface eth0.100
  */
 static void handleUpInterface(const std::vector<std::string>& tokens) {
-    if (tokens.size() < 2) {
+    if (tokens.size() != 2) {
         printLocalError("Usage: up-interface <interface-name>");
         return;
     }
-    
-    std::string iface_name = tokens[1];
+
+    const std::string iface_name = tokens[1];
+    if (!isValidLinuxInterfaceName(iface_name) || !hostInterfaceExists(iface_name)) {
+        printArgumentError("up-interface", 1, iface_name, "an existing Linux interface", "up-interface <interface-name>");
+        return;
+    }
     if (bringUpInterface(iface_name)) {
         printLocalInfo("Interface " + iface_name + " brought up");
     }
@@ -1641,12 +1670,16 @@ static void handleUpInterface(const std::vector<std::string>& tokens) {
  * Usage: down-interface eth0.100
  */
 static void handleDownInterface(const std::vector<std::string>& tokens) {
-    if (tokens.size() < 2) {
+    if (tokens.size() != 2) {
         printLocalError("Usage: down-interface <interface-name>");
         return;
     }
-    
-    std::string iface_name = tokens[1];
+
+    const std::string iface_name = tokens[1];
+    if (!isValidLinuxInterfaceName(iface_name) || !hostInterfaceExists(iface_name)) {
+        printArgumentError("down-interface", 1, iface_name, "an existing Linux interface", "down-interface <interface-name>");
+        return;
+    }
     if (bringDownInterface(iface_name)) {
         printLocalInfo("Interface " + iface_name + " brought down");
     }
@@ -1657,13 +1690,25 @@ static void handleDownInterface(const std::vector<std::string>& tokens) {
  * Usage: set-ip eth0.100 192.168.1.1/24
  */
 static void handleSetInterfaceIp(const std::vector<std::string>& tokens) {
-    if (tokens.size() < 3) {
+    if (tokens.size() != 3) {
         printLocalError("Usage: set-ip <interface-name> <ip-address>/<prefix>");
         return;
     }
-    
-    std::string iface_name = tokens[1];
-    std::string ip = tokens[2];
+
+    const std::string iface_name = tokens[1];
+    const std::string ip = tokens[2];
+    std::string ipOnly;
+    int prefix = 32;
+
+    if (!isValidLinuxInterfaceName(iface_name) || !hostInterfaceExists(iface_name)) {
+        printArgumentError("set-ip", 1, iface_name, "an existing Linux interface", "set-ip <interface-name> <ip-address>/<prefix>");
+        return;
+    }
+    if (!parseIpv4WithOptionalPrefix(ip, ipOnly, prefix)) {
+        printArgumentError("set-ip", 2, ip, "an IPv4 address with prefix such as 192.168.10.1/24", "set-ip <interface-name> <ip-address>/<prefix>");
+        return;
+    }
+
     if (setInterfaceIp(iface_name, ip)) {
         printLocalInfo("IP address " + ip + " assigned to " + iface_name);
     }
@@ -1674,6 +1719,11 @@ static void handleSetInterfaceIp(const std::vector<std::string>& tokens) {
  * Usage: list-interfaces
  */
 static void handleListInterfaces(const std::vector<std::string>& tokens) {
+    if (tokens.size() != 1) {
+        printLocalError("Usage: list-interfaces");
+        return;
+    }
+
     auto interfaces = listAllInterfaces();
     if (interfaces.empty()) {
         printLocalWarning("No interfaces found");
@@ -1796,6 +1846,117 @@ static bool startsWithCaseInsensitive(const std::string& value, const std::strin
     return true;
 }
 
+static bool isNumericToken(const std::string& value) {
+    if (value.empty()) {
+        return false;
+    }
+    return std::all_of(value.begin(), value.end(), [](unsigned char ch) {
+        return std::isdigit(ch) != 0;
+    });
+}
+
+static std::string joinSuggestions(const std::vector<std::string>& values, size_t maxItems = 10) {
+    if (values.empty()) {
+        return "none";
+    }
+
+    std::ostringstream oss;
+    const size_t count = std::min(values.size(), maxItems);
+    for (size_t i = 0; i < count; ++i) {
+        if (i > 0) {
+            oss << ", ";
+        }
+        oss << values[i];
+    }
+    if (values.size() > count) {
+        oss << ", ...";
+    }
+    return oss.str();
+}
+
+static std::vector<std::string> linuxInterfaceCandidates(bool trafficOnly = false, bool physicalOnly = false) {
+    std::vector<std::string> out;
+    if (trafficOnly) {
+        out = configuredTrafficPorts();
+    }
+
+    const auto discovered = physicalOnly
+        ? listPhysicalPorts()
+        : (hostNetSysfsAvailable() ? listHostInterfacesFromSysfs() : listAllInterfaces());
+
+    for (const auto& iface : discovered) {
+        if (iface.empty() || iface == "lo") {
+            continue;
+        }
+        if (trafficOnly && !isTrafficPortAllowed(iface)) {
+            continue;
+        }
+        out.push_back(iface);
+    }
+
+    std::sort(out.begin(), out.end());
+    out.erase(std::unique(out.begin(), out.end()), out.end());
+    return out;
+}
+
+static std::vector<std::string> suggestVlanIds(const std::string& parent, size_t maxCount = 12) {
+    std::vector<std::string> out;
+    std::set<int> used;
+
+    if (!parent.empty()) {
+        const std::string prefix = parent + ".";
+        const auto all = linuxInterfaceCandidates(false, false);
+        for (const auto& iface : all) {
+            if (!startsWith(iface, prefix)) {
+                continue;
+            }
+            const std::string suffix = iface.substr(prefix.size());
+            if (isNumericToken(suffix)) {
+                used.insert(std::stoi(suffix));
+            }
+        }
+    }
+
+    auto pushIfFree = [&](int vlanId) {
+        if (vlanId < 1 || vlanId > 4094 || used.count(vlanId) != 0 || out.size() >= maxCount) {
+            return;
+        }
+        out.push_back(std::to_string(vlanId));
+    };
+
+    for (int preferred : {10, 20, 30, 40, 50, 100, 200, 300, 400, 500, 1000, 2000}) {
+        pushIfFree(preferred);
+    }
+    for (int vlanId = 1; vlanId <= 4094 && out.size() < maxCount; ++vlanId) {
+        pushIfFree(vlanId);
+    }
+
+    return out;
+}
+
+static std::vector<std::string> ipExampleCandidates() {
+    return {"192.168.10.1/24", "10.10.10.1/24", "172.16.0.1/24"};
+}
+
+static void printArgumentError(
+    const std::string& command,
+    int argumentIndex,
+    const std::string& actualValue,
+    const std::string& expected,
+    const std::string& usage = ""
+) {
+    std::ostringstream oss;
+    oss << "Invalid argument " << argumentIndex << " for " << command;
+    if (!actualValue.empty()) {
+        oss << ": '" << actualValue << "'";
+    }
+    oss << ". Expected " << expected;
+    if (!usage.empty()) {
+        oss << ". Usage: " << usage;
+    }
+    printLocalError(oss.str());
+}
+
 static std::vector<std::string> firstWordCommandsForMode(CliMode mode) {
     std::vector<std::string> out = {
         "show", "about", "status", "state", "restart", "stop", "help", "exit", "quit", "set", "save", "write"
@@ -1845,48 +2006,70 @@ static std::vector<std::string> completionCandidates(
     std::vector<std::string> tokens = splitTokens(currentLine);
     const bool endsWithSpace = !currentLine.empty() && std::isspace(static_cast<unsigned char>(currentLine.back()));
 
-    int tokenIndex = endsWithSpace ? static_cast<int>(tokens.size()) : static_cast<int>(tokens.size()) - 1;
-    std::string prefix;
-    if (!endsWithSpace && !tokens.empty()) {
-        prefix = tokens.back();
-    }
+    const int tokenIndex = endsWithSpace ? static_cast<int>(tokens.size()) : static_cast<int>(tokens.size()) - 1;
+    const std::string prefix = (!endsWithSpace && !tokens.empty()) ? tokens.back() : "";
 
     const std::string t0 = tokens.size() > 0 ? toLowerCopy(tokens[0]) : "";
     const std::string t1 = tokens.size() > 1 ? toLowerCopy(tokens[1]) : "";
+    const std::string t2 = tokens.size() > 2 ? toLowerCopy(tokens[2]) : "";
 
     if (tokenIndex <= 0) {
         candidates = firstWordCommandsForMode(mode);
+    } else if ((t0 == "configure" || t0 == "conf") && tokenIndex == 1) {
+        candidates = {"terminal", "t"};
+    } else if (t0 == "write" && tokenIndex == 1) {
+        candidates = {"memory", "mem"};
     } else if (t0 == "show" && tokenIndex == 1) {
-        candidates = {"running-config", "logging", "log", "interface", "iface", "ports", "config", "about"};
+        candidates = {"running-config", "logging", "log", "interface", "iface", "ports", "about"};
     } else if ((t0 == "show") && (t1 == "interface" || t1 == "iface") && tokenIndex == 2) {
         for (const auto& iface : g_ifaces) {
             candidates.push_back(iface.name);
         }
+        if (!selectedInterface.empty()) {
+            candidates.push_back(selectedInterface);
+        }
+    } else if ((t0 == "show") && (t1 == "interface" || t1 == "iface") && tokenIndex == 3) {
+        candidates = {"detail"};
     } else if ((t0 == "interface" || t0 == "int") && tokenIndex == 1) {
         for (const auto& iface : g_ifaces) {
             candidates.push_back(iface.name);
         }
+    } else if ((t0 == "hostname") && tokenIndex == 1) {
+        candidates = {g_cliHostname, "vepc-core", "mme-sgsn"};
+    } else if ((t0 == "plmn") && tokenIndex == 1) {
+        candidates = {"001", "250", "255", "310"};
+    } else if ((t0 == "plmn") && tokenIndex == 2) {
+        candidates = {"01", "20", "260"};
+    } else if ((t0 == "set") && tokenIndex == 1) {
+        candidates = {"mcc", "mnc", "s11-bind-ip", "gn-gtp-c-bind-ip", "gn-gtp-u-bind-ip"};
+    } else if ((t0 == "set") && tokenIndex == 2) {
+        if (t1 == "mcc") {
+            candidates = {"001", "250", "310"};
+        } else if (t1 == "mnc") {
+            candidates = {"01", "20", "260"};
+        } else {
+            candidates = {"0.0.0.0", "127.0.0.1"};
+        }
+    } else if ((t0 == "create-vlan") && tokenIndex == 1) {
+        candidates = linuxInterfaceCandidates(true, true);
+    } else if ((t0 == "create-vlan") && tokenIndex == 2) {
+        candidates = suggestVlanIds(tokens.size() > 1 ? tokens[1] : "");
+    } else if ((t0 == "delete-interface" || t0 == "up-interface" || t0 == "down-interface" || t0 == "set-ip") && tokenIndex == 1) {
+        candidates = linuxInterfaceCandidates(false, false);
+    } else if ((t0 == "set-ip") && tokenIndex == 2) {
+        candidates = ipExampleCandidates();
     } else if (mode == CliMode::InterfaceConfig && t0 == "no" && tokenIndex == 1) {
         candidates = {"shutdown", "ip"};
     } else if (mode == CliMode::InterfaceConfig && t0 == "no" && t1 == "ip" && tokenIndex == 2) {
         candidates = {"address"};
     } else if (mode == CliMode::InterfaceConfig && t0 == "ip" && tokenIndex == 1) {
         candidates = {"address"};
+    } else if (mode == CliMode::InterfaceConfig && t0 == "ip" && t1 == "address" && tokenIndex == 2) {
+        candidates = ipExampleCandidates();
+    } else if (mode == CliMode::InterfaceConfig && t0 == "ip" && t1 == "address" && tokenIndex == 3) {
+        candidates = {"255.255.255.0", "255.255.0.0", "255.0.0.0"};
     } else if (mode == CliMode::InterfaceConfig && t0 == "bind" && tokenIndex == 1) {
-        const auto systemIfaces = listAllInterfaces();
-        for (const auto& iface : systemIfaces) {
-            if (isTrafficPortAllowed(iface)) {
-                candidates.push_back(iface);
-            }
-        }
-    } else if (mode == CliMode::Exec && (t0 == "configure" || t0 == "conf") && tokenIndex == 1) {
-        candidates = {"terminal"};
-    } else if (mode == CliMode::Config && t0 == "plmn" && tokenIndex == 1) {
-        candidates = {"250", "255", "310"};
-    }
-
-    if (!selectedInterface.empty() && (t0 == "show") && (t1 == "interface" || t1 == "iface") && tokenIndex == 2) {
-        candidates.push_back(selectedInterface);
+        candidates = linuxInterfaceCandidates(true, false);
     }
 
     std::set<std::string> dedup;
@@ -2244,6 +2427,7 @@ static bool isHelpCommand(const std::vector<std::string>& tokens) {
 }
 
 static void printModeHint() {
+    printLocalInfo("Press Tab to complete commands and show valid next arguments.");
     printLocalInfo("Structured mode commands: configure terminal | interface <name> | hostname <name> | plmn <mcc> <mnc> | shutdown | no shutdown | ip address <ip[/prefix]> | bind <linux-iface> | end");
     printLocalInfo("Cisco-style commands: show [running-config | interface | ports | status | logging | about] | about");
 #ifndef _WIN32
@@ -2384,7 +2568,11 @@ int main() {
         }
 
         if ((mode == CliMode::Exec || mode == CliMode::Config) && tokens.size() >= 1 && toLowerCopy(tokens[0]) == "set") {
-            printLocalError("Usage: set <key> <value>");
+            if (tokens.size() == 1) {
+                printArgumentError("set", 1, "", "a configuration key", "set <key> <value>");
+            } else {
+                printArgumentError("set", 2, "", "a value for key '" + tokens[1] + "'", "set <key> <value>");
+            }
             printPrompt(promptForMode(mode, selectedInterface));
             continue;
         }
@@ -2415,7 +2603,11 @@ int main() {
                 if (idx >= 0) {
                     handleIface(g_ifaces[idx], "status");
                 } else {
-                    printLocalError("Unknown interface: " + tokens[2]);
+                    std::vector<std::string> names;
+                    for (const auto& iface : g_ifaces) {
+                        names.push_back(iface.name);
+                    }
+                    printArgumentError("show interface", 1, tokens[2], "one of: " + joinSuggestions(names), "show interface [<name> [detail]]");
                 }
             } else {
                 printLocalError("Usage: show interface [<name> [detail]]");
@@ -2484,7 +2676,11 @@ int main() {
                 mode = CliMode::InterfaceConfig;
                 printLocalInfo("Entered interface configuration mode: " + selectedInterface);
             } else {
-                printLocalError("Unknown interface: " + tokens[1]);
+                std::vector<std::string> names;
+                for (const auto& iface : g_ifaces) {
+                    names.push_back(iface.name);
+                }
+                printArgumentError("interface", 1, tokens[1], "one of: " + joinSuggestions(names), "interface <name>");
             }
             printPrompt(promptForMode(mode, selectedInterface));
             continue;
@@ -2496,7 +2692,7 @@ int main() {
                 if (tokens.size() != 2) {
                     printLocalError("Usage: hostname <name>");
                 } else if (!isValidHostnameToken(tokens[1])) {
-                    printLocalError("Invalid hostname. Allowed: letters, digits, '-', max 63 chars.");
+                    printArgumentError("hostname", 1, tokens[1], "letters, digits, '-', max 63 chars", "hostname <name>");
                 } else {
                     g_cliHostname = tokens[1];
                     printLocalInfo("Hostname set to: " + g_cliHostname);
@@ -2508,9 +2704,9 @@ int main() {
                 if (tokens.size() != 3) {
                     printLocalError("Usage: plmn <mcc> <mnc>");
                 } else if (!isValidMcc(tokens[1])) {
-                    printLocalError("Invalid MCC. Expected exactly 3 digits.");
+                    printArgumentError("plmn", 1, tokens[1], "exactly 3 digits", "plmn <mcc> <mnc>");
                 } else if (!isValidMnc(tokens[2])) {
-                    printLocalError("Invalid MNC. Expected 2 or 3 digits.");
+                    printArgumentError("plmn", 2, tokens[2], "2 or 3 digits", "plmn <mcc> <mnc>");
                 } else {
                     sendToServer("set mcc " + tokens[1]);
                     sendToServer("set mnc " + tokens[2]);
@@ -2611,14 +2807,19 @@ int main() {
                 continue;
             }
             if (head == "bind") {
-                if (tokens.size() != 2 || !isSafeLinuxInterfaceName(tokens[1])) {
+                if (tokens.size() != 2) {
                     printLocalError("Usage: bind <linux-interface>");
+                    printPrompt(promptForMode(mode, selectedInterface));
+                    continue;
+                }
+                if (!isSafeLinuxInterfaceName(tokens[1]) || !hostInterfaceExists(tokens[1])) {
+                    printArgumentError("bind", 1, tokens[1], "an existing Linux interface from the allowed traffic ports: " + trafficPortsHint(), "bind <linux-interface>");
                     printPrompt(promptForMode(mode, selectedInterface));
                     continue;
                 }
 
                 if (!isTrafficPortAllowed(tokens[1])) {
-                    printLocalError("Binding allowed only on traffic ports. Allowed: " + trafficPortsHint());
+                    printArgumentError("bind", 1, tokens[1], "one of the allowed traffic ports: " + trafficPortsHint(), "bind <linux-interface>");
                     printPrompt(promptForMode(mode, selectedInterface));
                     continue;
                 }

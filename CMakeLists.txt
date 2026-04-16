@@ -51,6 +51,9 @@ if(UNIX)
 add_executable(test-linux-interface
     tests/test_linux_interface.cpp
 )
+add_executable(test-cli-guidance
+    tests/test_cli_guidance.cpp
+)
 endif()
 
 add_executable(test-s11-gtpc-client
@@ -73,6 +76,7 @@ add_test(NAME diameter-parser-smoke COMMAND test-diameter-parser)
 add_test(NAME s1ap-parser-smoke COMMAND test-s1ap-parser)
 if(UNIX)
 add_test(NAME linux-interface-smoke COMMAND test-linux-interface)
+add_test(NAME cli-guidance-smoke COMMAND test-cli-guidance)
 endif()
 add_test(
     NAME runtime-state-recovery-smoke
