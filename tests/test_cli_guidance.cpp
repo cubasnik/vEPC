@@ -1,5 +1,7 @@
 #include <algorithm>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -27,7 +29,24 @@ bool containsDigitSuggestion(const std::vector<std::string>& values) {
 int main() {
 #ifndef _WIN32
     setenv("VEPC_TRAFFIC_PORTS", "eno3,eno4", 1);
+    const std::filesystem::path tempDir = std::filesystem::temp_directory_path() / "vepc-cli-guidance-test";
+    std::error_code ec;
+    std::filesystem::create_directories(tempDir, ec);
+    std::ofstream(tempDir / "traffic_ports.conf") << "eno5\n";
+    setenv("CONFIG_PATH", tempDir.string().c_str(), 1);
 #endif
+
+    const auto execCommands = firstWordCommandsForMode(CliMode::Exec);
+    if (!contains(execCommands, "add-traffic-port") || !contains(execCommands, "remove-traffic-port")) {
+        std::cerr << "Expected exec mode to expose traffic-port management commands\n";
+        return 1;
+    }
+
+    const auto mergedPorts = configuredTrafficPorts();
+    if (!contains(mergedPorts, "eno5")) {
+        std::cerr << "Expected configuredTrafficPorts to include persisted additions from config\n";
+        return 1;
+    }
 
     const auto vlanPorts = completionCandidates(CliMode::Exec, "create-vlan ", "");
     if (!contains(vlanPorts, "eno3") || !contains(vlanPorts, "eno4")) {
@@ -62,6 +81,12 @@ int main() {
     const auto bindHints = completionCandidates(CliMode::InterfaceConfig, "bind ", "S1-MME");
     if (!contains(bindHints, "eno3") || !contains(bindHints, "eno4")) {
         std::cerr << "Expected bind completion to suggest allowed traffic interfaces\n";
+        return 1;
+    }
+
+    const auto removeHints = completionCandidates(CliMode::Exec, "remove-traffic-port ", "");
+    if (!contains(removeHints, "eno3") || !contains(removeHints, "eno4") || !contains(removeHints, "eno5")) {
+        std::cerr << "Expected remove-traffic-port completion to suggest configured traffic interfaces\n";
         return 1;
     }
 

@@ -912,7 +912,12 @@ static std::string stripTrafficPortToken(std::string token) {
     return token;
 }
 
-static std::vector<std::string> configuredTrafficPorts() {
+static std::string trafficPortsConfigPath() {
+    const char* cp = getenv("CONFIG_PATH");
+    return std::string(cp && *cp ? cp : "/etc/vepc") + "/traffic_ports.conf";
+}
+
+static std::vector<std::string> envConfiguredTrafficPorts() {
     std::vector<std::string> out;
     const char* raw = getenv("VEPC_TRAFFIC_PORTS");
     if (!raw || !*raw) {
@@ -923,8 +928,57 @@ static std::vector<std::string> configuredTrafficPorts() {
     std::istringstream ss(raw);
     while (std::getline(ss, token, ',')) {
         token = stripTrafficPortToken(token);
-        if (!token.empty()) {
+        if (!token.empty() && std::find(out.begin(), out.end(), token) == out.end()) {
             out.push_back(token);
+        }
+    }
+    return out;
+}
+
+static std::vector<std::string> persistedTrafficPorts() {
+    std::vector<std::string> out;
+    std::ifstream in(trafficPortsConfigPath());
+    if (!in.good()) {
+        return out;
+    }
+
+    std::string line;
+    while (std::getline(in, line)) {
+        line = trim(line);
+        if (line.empty() || line[0] == '#') {
+            continue;
+        }
+
+        std::string token;
+        std::istringstream ss(line);
+        while (std::getline(ss, token, ',')) {
+            token = stripTrafficPortToken(token);
+            if (!token.empty() && std::find(out.begin(), out.end(), token) == out.end()) {
+                out.push_back(token);
+            }
+        }
+    }
+    return out;
+}
+
+static bool savePersistedTrafficPorts(const std::vector<std::string>& ports) {
+    std::ofstream out(trafficPortsConfigPath(), std::ios::trunc);
+    if (!out.is_open()) {
+        return false;
+    }
+
+    out << "# Additional traffic interfaces added from the CLI\n";
+    for (const auto& port : ports) {
+        out << port << "\n";
+    }
+    return true;
+}
+
+static std::vector<std::string> configuredTrafficPorts() {
+    std::vector<std::string> out = envConfiguredTrafficPorts();
+    for (const auto& port : persistedTrafficPorts()) {
+        if (std::find(out.begin(), out.end(), port) == out.end()) {
+            out.push_back(port);
         }
     }
     return out;
@@ -1049,13 +1103,16 @@ static void showPortsFromLinux() {
     const auto allowed = configuredTrafficPorts();
     const auto all = hostNetSysfsAvailable() ? listHostInterfacesFromSysfs() : listAllInterfaces();
 
+    const auto persisted = persistedTrafficPorts();
+
     printSectionTitle("TRAFFIC PORT POLICY", 72);
     printKeyValueTable({
-        {"Allowed Ports", allowed.empty() ? "not configured" : trafficPortsHint()}
+        {"Allowed Ports", allowed.empty() ? "not configured" : trafficPortsHint()},
+        {"CLI Additions", persisted.empty() ? "none" : joinSuggestions(persisted, 32)}
     });
 
     if (allowed.empty()) {
-        printLocalWarning("No traffic ports configured. Set VEPC_TRAFFIC_PORTS (via Ansible traffic_linux_ports).");
+        printLocalWarning("No traffic ports configured. Set VEPC_TRAFFIC_PORTS via Ansible traffic_linux_ports or use add-traffic-port <iface>.");
     }
 
     const auto portInfoMap = readTrafficPortsInfo();
@@ -1083,6 +1140,80 @@ static void showPortsFromLinux() {
     }
 
     printPhysicalPortsSection();
+}
+
+static bool isPhysicalTrafficCandidate(const std::string& iface) {
+    const auto physical = listPhysicalPorts();
+    return std::find(physical.begin(), physical.end(), iface) != physical.end();
+}
+
+static void handleAddTrafficPort(const std::vector<std::string>& tokens) {
+    if (tokens.size() != 2) {
+        printLocalError("Usage: add-traffic-port <interface-name>");
+        return;
+    }
+
+    const std::string iface = tokens[1];
+    if (!isValidLinuxInterfaceName(iface) || !hostInterfaceExists(iface)) {
+        printArgumentError("add-traffic-port", 1, iface, "an existing physical Linux interface", "add-traffic-port <interface-name>");
+        return;
+    }
+    if (!isPhysicalTrafficCandidate(iface)) {
+        printArgumentError("add-traffic-port", 1, iface, "a physical host interface, not a bridge/VLAN/tunnel", "add-traffic-port <interface-name>");
+        return;
+    }
+
+    const auto allowed = configuredTrafficPorts();
+    if (std::find(allowed.begin(), allowed.end(), iface) != allowed.end()) {
+        printLocalInfo("Traffic interface " + iface + " is already allowed");
+        return;
+    }
+
+    auto persisted = persistedTrafficPorts();
+    persisted.push_back(iface);
+    std::sort(persisted.begin(), persisted.end());
+    persisted.erase(std::unique(persisted.begin(), persisted.end()), persisted.end());
+
+    if (!savePersistedTrafficPorts(persisted)) {
+        printLocalError("Failed to persist traffic interface list to " + trafficPortsConfigPath());
+        return;
+    }
+
+    printLocalInfo("Traffic interface " + iface + " added successfully and is available immediately");
+}
+
+static void handleRemoveTrafficPort(const std::vector<std::string>& tokens) {
+    if (tokens.size() != 2) {
+        printLocalError("Usage: remove-traffic-port <interface-name>");
+        return;
+    }
+
+    const std::string iface = tokens[1];
+    auto persisted = persistedTrafficPorts();
+    const auto beforeSize = persisted.size();
+    persisted.erase(std::remove(persisted.begin(), persisted.end(), iface), persisted.end());
+
+    if (persisted.size() == beforeSize) {
+        const auto envPorts = envConfiguredTrafficPorts();
+        if (std::find(envPorts.begin(), envPorts.end(), iface) != envPorts.end()) {
+            printLocalWarning("Traffic interface " + iface + " is managed by Ansible inventory or VEPC_TRAFFIC_PORTS. Remove it there if you want to disable it.");
+        } else {
+            printArgumentError("remove-traffic-port", 1, iface, "a CLI-added traffic interface", "remove-traffic-port <interface-name>");
+        }
+        return;
+    }
+
+    if (!savePersistedTrafficPorts(persisted)) {
+        printLocalError("Failed to persist traffic interface list to " + trafficPortsConfigPath());
+        return;
+    }
+
+    const auto envPorts = envConfiguredTrafficPorts();
+    if (std::find(envPorts.begin(), envPorts.end(), iface) != envPorts.end()) {
+        printLocalWarning("Traffic interface " + iface + " was removed from CLI additions, but it remains allowed by Ansible inventory or VEPC_TRAFFIC_PORTS.");
+    } else {
+        printLocalInfo("Traffic interface " + iface + " removed successfully");
+    }
 }
 #endif
 
@@ -1786,7 +1917,7 @@ static void handleListInterfaces(const std::vector<std::string>& tokens) {
 
     const auto allowed = configuredTrafficPorts();
     if (allowed.empty()) {
-        printLocalWarning("No traffic interfaces configured. Set VEPC_TRAFFIC_PORTS via Ansible traffic_linux_ports.");
+        printLocalWarning("No traffic interfaces configured. Set VEPC_TRAFFIC_PORTS via Ansible traffic_linux_ports or use add-traffic-port <iface>.");
         return;
     }
 
@@ -1853,7 +1984,7 @@ static void printExecHelp() {
         {"Navigation", "configure terminal | exit"},
         {"Show", "show running-config | show logging | show interface [<name> [detail]] | show ports | show about"},
         {"Runtime", "status | state | restart | stop | save"},
-        {"Linux", "create-vlan <parent> <vlan-id> | delete-vlan <parent> <vlan-id> | delete-interface <name>"},
+        {"Linux", "create-vlan <parent> <vlan-id> | delete-vlan <parent> <vlan-id> | add-traffic-port <name> | remove-traffic-port <name> | delete-interface <name>"},
         {"Info", "about"},
         {"Config", "set <key> <value>"},
         {"Help", "help | ?"}
@@ -1867,7 +1998,7 @@ static void printConfigHelp() {
         {"Runtime", "restart | stop"},
         {"Config", "set <key> <value> | hostname <name> | plmn <mcc> <mnc> | commit"},
         {"Show", "show running-config | show logging | show interface [<name> [detail]] | show ports | show about"},
-        {"Linux", "create-vlan <parent> <vlan-id> | delete-vlan <parent> <vlan-id> | delete-interface <name>"},
+        {"Linux", "create-vlan <parent> <vlan-id> | delete-vlan <parent> <vlan-id> | add-traffic-port <name> | remove-traffic-port <name> | delete-interface <name>"},
         {"Info", "about"},
         {"Help", "help | ?"}
     });
@@ -2069,6 +2200,8 @@ static std::vector<std::string> firstWordCommandsForMode(CliMode mode) {
     if (mode == CliMode::Exec || mode == CliMode::Config) {
         out.push_back("create-vlan");
         out.push_back("delete-vlan");
+        out.push_back("add-traffic-port");
+        out.push_back("remove-traffic-port");
         out.push_back("delete-interface");
         out.push_back("up-interface");
         out.push_back("down-interface");
@@ -2137,6 +2270,10 @@ static std::vector<std::string> completionCandidates(
         candidates = linuxInterfaceCandidates(true, true);
     } else if ((t0 == "create-vlan" || t0 == "delete-vlan") && tokenIndex == 2) {
         candidates = suggestVlanIds(tokens.size() > 1 ? tokens[1] : "");
+    } else if ((t0 == "add-traffic-port") && tokenIndex == 1) {
+        candidates = listPhysicalPorts();
+    } else if ((t0 == "remove-traffic-port") && tokenIndex == 1) {
+        candidates = configuredTrafficPorts();
     } else if ((t0 == "delete-interface" || t0 == "up-interface" || t0 == "down-interface" || t0 == "set-ip") && tokenIndex == 1) {
         candidates = linuxInterfaceCandidates(false, false);
     } else if ((t0 == "set-ip") && tokenIndex == 2) {
@@ -2515,6 +2652,7 @@ static void printModeHint() {
     printLocalInfo("Cisco-style commands: show [running-config | interface | ports | status | logging | about] | about");
 #ifndef _WIN32
     printLocalInfo("Linux interface commands: create-vlan <parent> <vlan-id> | delete-vlan <parent> <vlan-id>");
+    printLocalInfo("                          add-traffic-port <name> | remove-traffic-port <name>");
     printLocalInfo("                          delete-interface <name>");
     printLocalInfo("                          up-interface <name> | down-interface <name> | set-ip <name> <ip/prefix>");
     printLocalInfo("                          list-interfaces");
@@ -2727,6 +2865,18 @@ int main() {
                 continue;
             }
             
+            if (cmd == "add-traffic-port") {
+                handleAddTrafficPort(tokens);
+                printPrompt(promptForMode(mode, selectedInterface));
+                continue;
+            }
+
+            if (cmd == "remove-traffic-port") {
+                handleRemoveTrafficPort(tokens);
+                printPrompt(promptForMode(mode, selectedInterface));
+                continue;
+            }
+
             if (cmd == "delete-interface") {
                 handleDeleteInterface(tokens);
                 printPrompt(promptForMode(mode, selectedInterface));
