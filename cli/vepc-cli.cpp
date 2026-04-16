@@ -2068,7 +2068,7 @@ static bool isNumericToken(const std::string& value) {
     });
 }
 
-static std::string joinSuggestions(const std::vector<std::string>& values, size_t maxItems = 10) {
+static std::string joinSuggestions(const std::vector<std::string>& values, size_t maxItems) {
     if (values.empty()) {
         return "none";
     }
