@@ -62,15 +62,7 @@ vepc-test ansible_host=192.168.1.101 ansible_user=ubuntu ansible_ssh_private_key
 
 ### 2. Customize Variables
 
-You can specify traffic interfaces directly in the inventory:
-
-```ini
-[vepc_hosts]
-vepc-prod ansible_host=192.168.1.100 ansible_user=ubuntu traffic_linux_ports=eno1,eno2
-vepc-test ansible_host=192.168.1.101 ansible_user=ubuntu traffic_linux_ports=ens3,ens4
-```
-
-Or use `ansible/group_vars/vepc_hosts.yml` for list variables:
+Use `ansible/group_vars/vepc_hosts.yml` for list variables (recommended):
 
 ```yaml
 traffic_linux_ports:
@@ -78,13 +70,11 @@ traffic_linux_ports:
   - eno2
 ```
 
-`traffic_linux_ports` is required and defines Linux interfaces allowed for traffic operations (`bind`, `create-vlan`) to prevent accidental changes on management interfaces. Supported formats are a comma-separated inventory value like `traffic_linux_ports=eno1,eno2` or a YAML list.
+`traffic_linux_ports` is required and defines Linux interfaces allowed for traffic operations (`bind`, `create-vlan`) to prevent accidental changes on management interfaces.
 
 Important:
-- Default deployment mode is now a native Linux systemd service (`vepc_deploy_mode: systemd`).
-- If a NIC appears under `ovs-vsctl show`, it is already attached to Open vSwitch and will be rejected during deploy. Select a free NIC instead, or detach it from OVS first.
 - Interfaces enslaved to Open vSwitch (`master ovs-system`) are rejected during deploy because VLAN sub-interfaces cannot be created on them.
-- The service runs on the host and keeps direct access to Linux NIC/VLAN operations for CLI management.
+- Deployment runs the vEPC container as root (with `NET_ADMIN`) so `create-vlan` works from CLI without manual post-setup.
 
 PLMN (`MCC`/`MNC`) is no longer set via Ansible variables. Configure it from CLI:
 
@@ -133,27 +123,27 @@ ansible-playbook -i ansible/inventory vepc-deploy.yml -K
 
 ## Post-Deployment Verification
 
-### Check Service Status
+### Check Container Status
 
 ```bash
 # SSH to target machine
 ssh ubuntu@target-host-ip
 
-# Check native service status
-sudo systemctl status vepc
+# Check if container is running
+docker ps | grep vepc
 
-# View service logs
-sudo journalctl -u vepc -f
+# View container logs
+docker logs -f vepc-mme-sgsn
+
+# Check service status
+sudo systemctl status vepc
 ```
 
 ### Verify Service Functionality
 
 ```bash
-# Access CLI directly on the host
-/opt/vepc/build/vepc-cli
-
-# Or run a quick health check
-/opt/vepc/build/vepc-cli status
+# Access CLI
+docker exec -it vepc-mme-sgsn /app/vepc-cli
 
 # Inside CLI, run:
 vepc# show status
@@ -186,17 +176,17 @@ ansible -i ansible/inventory vepc_hosts -m ping
 ansible-playbook -i ansible/inventory vepc-deploy.yml -vvv -e "ansible_user=ubuntu"
 ```
 
-### Service Issues
+### Docker Issues
 
 ```bash
-# Check vEPC service
-sudo systemctl status vepc
+# Check Docker service
+sudo systemctl status docker
 
-# Restart vEPC
-sudo systemctl restart vepc
+# Restart Docker
+sudo systemctl restart docker
 
-# View service logs
-sudo journalctl -u vepc -f
+# View Docker daemon logs
+sudo journalctl -u docker -f
 ```
 
 ### Port Conflicts
@@ -209,14 +199,14 @@ sudo lsof -i :2123,36412,3868,5555
 sudo netstat -tlnup | grep LISTEN
 ```
 
-### Service Fails to Start
+### Container Fails to Start
 
 ```bash
 # View detailed logs
-sudo journalctl -u vepc -n 200 --no-pager
+docker logs vepc-mme-sgsn
 
-# Check the unit configuration
-sudo systemctl cat vepc
+# Inspect container
+docker inspect vepc-mme-sgsn
 
 # Check available disk space
 df -h

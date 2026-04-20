@@ -40,15 +40,10 @@
       - name: "vepccli"
         password: "vepccli"
 
-    # Deployment mode: 'systemd' is the recommended default during active network debugging.
-    # Switch to 'docker' later if you want containerized runtime again.
-    vepc_deploy_mode: "systemd"
-    vepc_service_name: "vepc"
-
     # Set to true to force Docker image rebuild on every deploy (--no-cache)
     vepc_force_rebuild: true
 
-    # Optional Docker configuration (used only when vepc_deploy_mode == 'docker')
+    # Docker configuration
     docker_registry: "docker.io"
     vepc_docker_image: "vepc:latest"
     vepc_container_name: "vepc-mme-sgsn"
@@ -82,9 +77,8 @@
           - traffic_linux_ports is defined
           - traffic_linux_ports | length > 0
         fail_msg: >-
-          Set traffic_linux_ports in ansible/inventory or ansible/group_vars/vepc_hosts.yml,
-          for example: traffic_linux_ports=eno1,eno2
-          or: traffic_linux_ports: ["eno1", "eno2"]
+          Set traffic_linux_ports as YAML list in ansible/group_vars/vepc_hosts.yml,
+          for example: traffic_linux_ports: ["eno1", "eno2"]
 
     - name: Normalize traffic Linux port allowlist
       set_fact:
@@ -92,13 +86,7 @@
           {{
             traffic_linux_ports
             if traffic_linux_ports is sequence and traffic_linux_ports is not string
-            else (
-              (traffic_linux_ports | trim | regex_search('^\[.*\]$'))
-              | ternary(
-                  (traffic_linux_ports | from_yaml),
-                  ((traffic_linux_ports | regex_replace('\s+', '')).split(','))
-                )
-            )
+            else (traffic_linux_ports | from_yaml)
           }}
 
     - name: Validate traffic Linux port allowlist type
@@ -108,10 +96,8 @@
           - traffic_linux_ports is not string
           - traffic_linux_ports | length > 0
         fail_msg: >-
-          traffic_linux_ports must resolve to a non-empty list.
-          Supported formats:
-          - ansible/inventory: traffic_linux_ports=eno1,eno2
-          - YAML vars: traffic_linux_ports: ["eno1", "eno2"]
+          traffic_linux_ports must be a YAML list, for example:
+          traffic_linux_ports: ["eno1", "eno2"]
 
     - name: Validate traffic Linux port names
       assert:
@@ -206,7 +192,6 @@
           - iproute2
           - tcpdump
           - jq
-          - libreadline-dev
           - python3
           - python3-pip
           - ca-certificates
@@ -215,60 +200,57 @@
           - openssh-server
         state: present
 
-    # ==================== Optional Docker Installation ====================
-    - name: Install Docker when docker deployment mode is requested
-      when: vepc_deploy_mode == 'docker'
-      block:
-        - name: Remove legacy Docker apt sources to avoid Signed-By conflicts
-          shell: |
-            set -e
-            for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
-              [ -f "$f" ] || continue
-              if grep -q "download.docker.com/linux/ubuntu" "$f"; then
-                sed -i '/download\.docker\.com\/linux\/ubuntu/d' "$f"
-              fi
-            done
-          args:
-            executable: /bin/bash
+    # ==================== Docker Installation ====================
+    - name: Remove legacy Docker apt sources to avoid Signed-By conflicts
+      shell: |
+        set -e
+        for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+          [ -f "$f" ] || continue
+          if grep -q "download.docker.com/linux/ubuntu" "$f"; then
+            sed -i '/download\.docker\.com\/linux\/ubuntu/d' "$f"
+          fi
+        done
+      args:
+        executable: /bin/bash
 
-        - name: Ensure apt keyrings directory exists
-          file:
-            path: /etc/apt/keyrings
-            state: directory
-            mode: '0755'
+    - name: Ensure apt keyrings directory exists
+      file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
 
-        - name: Remove malformed docker.sources file if present
-          file:
-            path: /etc/apt/sources.list.d/docker.sources
-            state: absent
+    - name: Remove malformed docker.sources file if present
+      file:
+        path: /etc/apt/sources.list.d/docker.sources
+        state: absent
 
-        - name: Install Docker GPG key to keyring
-          get_url:
-            url: https://download.docker.com/linux/ubuntu/gpg
-            dest: /etc/apt/keyrings/docker.asc
-            mode: '0644'
+    - name: Install Docker GPG key to keyring
+      get_url:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        dest: /etc/apt/keyrings/docker.asc
+        mode: '0644'
 
-        - name: Add Docker repository (signed-by keyring)
-          apt_repository:
-            repo: "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
-            filename: docker
-            state: present
-            update_cache: yes
+    - name: Add Docker repository (signed-by keyring)
+      apt_repository:
+        repo: "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+        filename: docker
+        state: present
+        update_cache: yes
 
-        - name: Install Docker
-          apt:
-            name:
-              - docker-ce
-              - docker-ce-cli
-              - containerd.io
-              - docker-compose-plugin
-            state: present
+    - name: Install Docker
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-compose-plugin
+        state: present
 
-        - name: Start Docker service
-          service:
-            name: docker
-            state: started
-            enabled: yes
+    - name: Start Docker service
+      service:
+        name: docker
+        state: started
+        enabled: yes
 
     # ==================== User and Directory Setup ====================
     - name: Create vepc group
@@ -290,7 +272,6 @@
         name: "{{ vepc_user }}"
         groups: docker
         append: yes
-      when: vepc_deploy_mode == 'docker'
 
     - name: Create required directories
       file:
@@ -345,21 +326,7 @@
         group: "{{ vepc_group }}"
         mode: '0755'
 
-    # ==================== Application Build ====================
-    - name: Build vEPC natively with CMake
-      shell: |
-        set -e
-        cmake -S {{ vepc_repo_path }} -B {{ build_path }} -DCMAKE_BUILD_TYPE=Release
-        cmake --build {{ build_path }} --parallel {{ ansible_processor_vcpus | default(2) }}
-      args:
-        executable: /bin/bash
-      become: true
-      become_user: "{{ vepc_user }}"
-      register: native_build
-      changed_when: true
-      when: vepc_deploy_mode == 'systemd'
-      notify: restart vepc service
-
+    # ==================== Docker Build ====================
     - name: Render deployment Dockerfile to target repository
       template:
         src: "Dockerfile.j2"
@@ -367,7 +334,6 @@
         owner: "{{ vepc_user }}"
         group: "{{ vepc_group }}"
         mode: '0644'
-      when: vepc_deploy_mode == 'docker'
 
     - name: Render .dockerignore to target repository
       template:
@@ -376,19 +342,15 @@
         owner: "{{ vepc_user }}"
         group: "{{ vepc_group }}"
         mode: '0644'
-      when: vepc_deploy_mode == 'docker'
 
     - name: Build Docker image from Dockerfile
       shell: |
         cd {{ vepc_repo_path }}
         docker compose build {% if vepc_force_rebuild | bool %}--no-cache {% endif %}--pull vepc
-      args:
-        executable: /bin/bash
       become: true
       become_user: "{{ vepc_user }}"
       register: docker_build
       changed_when: true
-      when: vepc_deploy_mode == 'docker'
       notify: restart vepc container
 
     # ==================== Configuration ====================
@@ -405,9 +367,7 @@
         - { src: "config/interfaces.conf.j2", dest: "interfaces.conf" }
         - { src: "config/vmme.conf.j2", dest: "vmme.conf" }
         - { src: "config/vsgsn.conf.j2", dest: "vsgsn.conf" }
-      notify:
-        - restart vepc service
-        - restart vepc container
+      notify: restart vepc container
 
     - name: Collect host traffic port state and MAC
       shell: |
@@ -415,8 +375,6 @@
         state=$(cat /sys/class/net/${port}/operstate 2>/dev/null || echo unknown)
         mac=$(cat /sys/class/net/${port}/address 2>/dev/null || echo N/A)
         echo "${port}=${state}|${mac}"
-      args:
-        executable: /bin/bash
       register: port_facts_raw
       loop: "{{ traffic_linux_ports }}"
       changed_when: false
@@ -428,10 +386,9 @@
         owner: "{{ vepc_user }}"
         group: "{{ vepc_group }}"
         mode: '0644'
-      notify:
-        - restart vepc service
-        - restart vepc container
+      notify: restart vepc container
 
+    # ==================== Docker Compose Setup ====================
     - name: Deploy docker-compose.yml
       template:
         src: "docker-compose.yml.j2"
@@ -439,68 +396,27 @@
         owner: "{{ vepc_user }}"
         group: "{{ vepc_group }}"
         mode: '0644'
-      when: vepc_deploy_mode == 'docker'
       notify: restart vepc container
 
-    - name: Stop legacy Docker container when using native systemd mode
-      shell: |
-        if command -v docker >/dev/null 2>&1; then
-          cd {{ vepc_repo_path }}
-          docker compose down || true
-        fi
-      args:
-        executable: /bin/bash
-      changed_when: false
-      when: vepc_deploy_mode == 'systemd'
-
-    - name: Create systemd service file for vEPC
-      template:
-        src: "vepc.service.j2"
-        dest: "/etc/systemd/system/{{ vepc_service_name }}.service"
-        mode: '0644'
-      when: vepc_deploy_mode == 'systemd'
-      notify:
-        - reload systemd
-        - restart vepc service
-
-    - name: Enable and start native vEPC service
-      systemd:
-        name: "{{ vepc_service_name }}"
-        enabled: yes
-        state: restarted
-        daemon_reload: yes
-      when: vepc_deploy_mode == 'systemd'
-
+    # ==================== Container Deployment ====================
     - name: Start vEPC container with docker compose
       shell: |
         cd {{ vepc_repo_path }}
         docker compose up -d --force-recreate --remove-orphans
-      args:
-        executable: /bin/bash
-      become: true
+      become: no
       become_user: "{{ vepc_user }}"
       environment:
         REPO_URL: "{{ vepc_repo_url }}"
         REPO_BRANCH: "{{ vepc_repo_branch }}"
       register: compose_result
       changed_when: "'Creating' in compose_result.stdout or 'Starting' in compose_result.stdout"
-      when: vepc_deploy_mode == 'docker'
 
-    - name: Wait for native vEPC CLI socket to be ready
-      wait_for:
-        path: /tmp/vepc.sock
-        state: present
-        delay: 2
-        timeout: 60
-      when: vepc_deploy_mode == 'systemd'
-
-    - name: Wait for dockerized vEPC service to be ready
+    - name: Wait for vEPC service to be ready
       wait_for:
         host: "localhost"
         port: "{{ cli_port }}"
         delay: 5
         timeout: 60
-      when: vepc_deploy_mode == 'docker'
       ignore_errors: yes
 
     # ==================== Health Check ====================
@@ -509,24 +425,32 @@
         name: "{{ vepc_container_name }}"
       register: container_info
       failed_when: container_info.exists == false or container_info.container['State']['Running'] == false
-      when: vepc_deploy_mode == 'docker'
 
-    - name: Check native vEPC service health
-      command: "{{ build_path }}/vepc-cli status"
-      environment:
-        CONFIG_PATH: "{{ config_path }}"
-      register: health_check_native
-      changed_when: false
-      failed_when: health_check_native.rc != 0
-      when: vepc_deploy_mode == 'systemd'
-
-    - name: Check dockerized vEPC service health
+    - name: Check vEPC service health
       command: docker exec {{ vepc_container_name }} /app/vepc-cli status
       register: health_check
       changed_when: false
       failed_when: health_check.rc != 0
-      when: vepc_deploy_mode == 'docker'
       ignore_errors: yes
+
+    # ==================== Systemd Service ====================
+    - name: Create systemd service file for vEPC
+      template:
+        src: "vepc.service.j2"
+        dest: "/etc/systemd/system/vepc.service"
+        mode: '0644'
+      notify:
+        - reload systemd
+        - enable vepc service
+
+    - name: Reload systemd daemon
+      systemd:
+        daemon_reload: yes
+
+    - name: Enable vEPC service
+      systemd:
+        name: vepc
+        enabled: yes
 
     # ==================== Firewall Configuration ====================
     - name: Configure UFW firewall rules
@@ -554,10 +478,10 @@
       loop: "{{ cli_users }}"
       when: ssh_cli_enabled | bool
 
-    - name: Add CLI users to vepc group
+    - name: Add CLI users to docker group
       user:
         name: "{{ item.name }}"
-        groups: "{{ vepc_group }}"
+        groups: docker
         append: yes
       loop: "{{ cli_users }}"
       when: ssh_cli_enabled | bool
@@ -622,7 +546,7 @@
           PermitTunnel no
           PrintMotd no
           Subsystem sftp internal-sftp
-          ForceCommand /usr/bin/env CONFIG_PATH={{ config_path }} {{ build_path }}/vepc-cli
+            ForceCommand docker compose -f {{ vepc_repo_path }}/docker-compose.yml exec vepc /app/vepc-cli
       when: ssh_cli_enabled | bool
 
     - name: Validate dedicated CLI sshd configuration
@@ -637,7 +561,8 @@
         content: |
           [Unit]
           Description=vEPC dedicated SSH CLI service
-          After=network.target
+          After=network.target docker.service
+          Requires=docker.service
 
           [Service]
           Type=simple
@@ -721,26 +646,26 @@
           Location: {{ vepc_repo_path }}
           Config: {{ config_path }}
           Logs: {{ log_path }}
-          Mode: {{ vepc_deploy_mode }}
-          Service: {{ vepc_service_name }}
-          Binary: {{ build_path }}/vepc
-
+          
+          Container: {{ vepc_container_name }}
+          Image: {{ vepc_docker_image }}
+          
           Services:
           - GTP-C: localhost:{{ gtp_c_port }}/udp
           - S1AP: localhost:{{ s1ap_port }}/sctp
           - Diameter: localhost:{{ diameter_port }}/udp
-          - Linux CLI socket: /tmp/vepc.sock
+          - CLI: localhost:{{ cli_port }}/tcp
           - SSH CLI: localhost:{{ ssh_cli_port }}/tcp (users: {{ cli_users | map(attribute='name') | join(', ') }})
           - Traffic Linux Ports: {{ traffic_linux_ports | join(', ') }}
-
-          Access the CLI:
-          $ {{ build_path }}/vepc-cli
-
+          
+          Optional use to access the CLI:
+          $ docker compose -f {{ vepc_repo_path }}/docker-compose.yml exec vepc /app/vepc-cli
+          
           View logs:
-          $ sudo journalctl -u {{ vepc_service_name }} -f
-
+          $ docker logs -f {{ vepc_container_name }}
+          
           Restart the service:
-          $ sudo systemctl restart {{ vepc_service_name }}
+          $ sudo systemctl restart vepc
           ============================================
 
   handlers:
@@ -755,24 +680,13 @@
 
     - name: enable vepc service
       systemd:
-        name: "{{ vepc_service_name }}"
+        name: vepc
         enabled: yes
-      when: vepc_deploy_mode == 'systemd'
-
-    - name: restart vepc service
-      systemd:
-        name: "{{ vepc_service_name }}"
-        state: restarted
-        daemon_reload: yes
-      when: vepc_deploy_mode == 'systemd'
 
     - name: restart vepc container
       shell: |
         cd {{ vepc_repo_path }}
         docker compose restart
-      args:
-        executable: /bin/bash
-      become: true
+      become: no
       become_user: "{{ vepc_user }}"
-      when: vepc_deploy_mode == 'docker'
       ignore_errors: yes

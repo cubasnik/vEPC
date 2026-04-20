@@ -1,13 +1,13 @@
 ---
 # Group variables for vepc_hosts
-# This file is automatically loaded by Ansible and overrides defaults from the playbook.
-# Prefer setting traffic_linux_ports per host in ansible/inventory.
+# This file is automatically loaded by Ansible and overrides defaults from the playbook
 
-# Traffic ports allowlist (optional here): Linux interfaces allowed for bind/create-vlan traffic operations.
-# Leave commented if you set it in inventory, for example:
-# traffic_linux_ports:
-#   - eno1
-#   - eno3
+# Traffic ports allowlist (required): Linux interfaces allowed for bind/create-vlan traffic operations.
+# Must be a YAML list (not a string)
+traffic_linux_ports:
+  - eno1
+  - eno3
+  - eno4
 
 # Optional: Override other variables per group here
 # Example:

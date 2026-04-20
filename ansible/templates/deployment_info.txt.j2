@@ -20,18 +20,17 @@ Repository Details:
   Branch: {{ vepc_repo_branch }}
 
 ================================================================================
-                     RUNTIME INFORMATION
+                     CONTAINER INFORMATION
 ================================================================================
-Deployment Mode: {{ vepc_deploy_mode }}
-Systemd Service: {{ vepc_service_name }}
-Binary Path: {{ vepc_repo_path }}/build/vepc
-CLI Path: {{ vepc_repo_path }}/build/vepc-cli
+Container Name: {{ vepc_container_name }}
+Docker Image: {{ vepc_docker_image }}
+Registry: {{ docker_registry }}
 
 Service Ports:
   GTP-C Signaling: 0.0.0.0:{{ gtp_c_port }}/udp
   S1AP Signaling: 0.0.0.0:{{ s1ap_port }}/sctp
   Diameter S6a: 0.0.0.0:{{ diameter_port }}/udp
-  CLI Socket: /tmp/vepc.sock
+  CLI Management: localhost:{{ cli_port }}/tcp
 
 Allowed Linux Traffic Ports:
   {{ traffic_linux_ports | join(', ') }}
@@ -53,32 +52,38 @@ Disk Space: {{ ((ansible_mounts | default([]) | first).size_total | default(0) |
                         QUICK COMMANDS
 ================================================================================
 
-Service status:
-  sudo systemctl status {{ vepc_service_name }}
+View container status:
+  sudo docker ps -a | grep {{ vepc_container_name }}
 
-View service logs (follow):
-  sudo journalctl -u {{ vepc_service_name }} -f
+View container logs (follow):
+  docker logs -f {{ vepc_container_name }}
 
 Access CLI:
-  {{ vepc_repo_path }}/build/vepc-cli
+  docker exec -it {{ vepc_container_name }} /app/vepc-cli
 
 Show system status:
-  {{ vepc_repo_path }}/build/vepc-cli status
+  docker exec {{ vepc_container_name }} /app/vepc-cli status
 
 Show interface status:
-  {{ vepc_repo_path }}/build/vepc-cli show interface
+  docker exec {{ vepc_container_name }} /app/vepc-cli show interface
 
 Show configuration:
-  {{ vepc_repo_path }}/build/vepc-cli show config
+  docker exec {{ vepc_container_name }} /app/vepc-cli show config
+
+View system logs:
+  docker exec {{ vepc_container_name }} /app/vepc-cli log
 
 Restart service:
-  sudo systemctl restart {{ vepc_service_name }}
+  sudo systemctl restart vepc
 
 Stop service:
-  sudo systemctl stop {{ vepc_service_name }}
+  sudo systemctl stop vepc
 
 Start service:
-  sudo systemctl start {{ vepc_service_name }}
+  sudo systemctl start vepc
+
+View systemd logs:
+  journalctl -u vepc -f
 
 ================================================================================
                     CONFIGURATION FILES
@@ -101,30 +106,30 @@ SGSN Configuration:
 ================================================================================
 
 Service Health: RUNNING
-Systemd Unit: {{ vepc_service_name }}
+Container Status: {{ container_info.container['State']['Status'] | default('N/A') if (container_info is defined and container_info.container is defined) else 'N/A' }}
 
 Health Check Command:
-  {{ vepc_repo_path }}/build/vepc-cli status
+  docker healthcheck inspect {{ vepc_container_name }}
 
 Manual Health Verification:
-  sudo systemctl status {{ vepc_service_name }}
+  docker exec {{ vepc_container_name }} /app/vepc-cli status
 
 ================================================================================
                       TROUBLESHOOTING
 ================================================================================
 
-If the service fails to start:
-1. Check systemd status:
-   sudo systemctl status {{ vepc_service_name }}
+If the container fails to start:
+1. Check Docker daemon status:
+   sudo systemctl status docker
 
 2. View detailed logs:
-   sudo journalctl -u {{ vepc_service_name }} -n 200 --no-pager
+   docker logs {{ vepc_container_name }}
 
 3. Verify configuration files:
    ls -la {{ config_path }}/
 
 4. Check network connectivity:
-   ip addr show
+   docker exec {{ vepc_container_name }} ip addr show
 
 5. Verify port binding:
    netstat -tlnup | grep -E '{{ gtp_c_port }}|{{ s1ap_port }}|{{ diameter_port }}|{{ cli_port }}'
@@ -133,9 +138,10 @@ If the service fails to start:
                       SECURITY NOTES
 ================================================================================
 
-- vEPC systemd service name: {{ vepc_service_name }}
-- Runtime user: root (required for NIC/VLAN operations)
-- Access mode: native host networking
+- vEPC service runs under user: {{ vepc_user }}
+- Container capabilities: SYS_ADMIN, NET_ADMIN, SYS_PTRACE
+- Container runtime user: root (0:0)
+- Network mode: host
 - VLAN kernel module: 8021q loaded
 - IP forwarding: Enabled
 - Firewall: Configured with UFW
