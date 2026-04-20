@@ -72,6 +72,10 @@ add_executable(test-diameter-parser
     src/diameter_parser.cpp
 )
 
+add_executable(test-subscriber-config
+    tests/test_subscriber_config.cpp
+)
+
 add_executable(test-s6a-diameter-client
     tests/test_s6a_diameter_client.cpp
     src/diameter_parser.cpp
@@ -80,6 +84,7 @@ add_executable(test-s6a-diameter-client
 add_test(NAME gtp-parser-smoke COMMAND test-gtp-parser)
 add_test(NAME diameter-parser-smoke COMMAND test-diameter-parser)
 add_test(NAME s1ap-parser-smoke COMMAND test-s1ap-parser)
+add_test(NAME subscriber-config-smoke COMMAND test-subscriber-config)
 if(UNIX)
 add_test(NAME linux-interface-smoke COMMAND test-linux-interface)
 add_test(NAME cli-guidance-smoke COMMAND test-cli-guidance)
