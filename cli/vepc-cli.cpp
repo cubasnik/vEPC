@@ -39,10 +39,21 @@ std::map<int, size_t> iface_num_to_idx;
 #ifdef _WIN32
 #define CLI_TCP_HOST    "127.0.0.1"
 #define CLI_TCP_PORT    5555
-#define CLI_ENDPOINT    "127.0.0.1:5555"
+static std::string getCliEndpoint() {
+    return "127.0.0.1:5555";
+}
 #else
-#define CLI_SOCKET      "/tmp/vepc.sock"
-#define CLI_ENDPOINT    CLI_SOCKET
+static std::string getCliSocketPath() {
+    const char* socketPath = getenv("VEPC_CLI_SOCKET");
+    if (socketPath && *socketPath) {
+        return std::string(socketPath);
+    }
+    return "/tmp/vepc.sock";
+}
+
+static std::string getCliEndpoint() {
+    return getCliSocketPath();
+}
 #endif
 
 #define INTERFACES_CONF "config/interfaces.conf"
@@ -1642,7 +1653,7 @@ static void printHelp() {
         {"Interface", "shutdown | no shutdown | default | show interface <name> detail"}
     });
 
-    std::cout << "\n" << DIM << "Connecting to " << RST << CYAN << CLI_ENDPOINT << RST << "\n\n";
+    std::cout << "\n" << DIM << "Connecting to " << RST << CYAN << getCliEndpoint() << RST << "\n\n";
     printPrompt();
 }
 
@@ -1700,9 +1711,15 @@ static void sendToServer(const std::string& cmd) {
 #else
     int sock = socket(AF_UNIX, SOCK_STREAM, 0);
     if (sock < 0) { perror("socket"); return; }
+    const std::string cliSocketPath = getCliSocketPath();
     struct sockaddr_un addr{};
     addr.sun_family = AF_UNIX;
-    strncpy(addr.sun_path, CLI_SOCKET, sizeof(addr.sun_path) - 1);
+    if (cliSocketPath.size() >= sizeof(addr.sun_path)) {
+        printLocalError("CLI socket path is too long: " + cliSocketPath);
+        close(sock);
+        return;
+    }
+    strncpy(addr.sun_path, cliSocketPath.c_str(), sizeof(addr.sun_path) - 1);
 
     bool connected = false;
     constexpr int kConnectRetryCount = 12;

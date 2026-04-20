@@ -54,11 +54,22 @@
 // Для Windows используем TCP CLI на localhost:5555
 #define CLI_TCP_HOST "127.0.0.1"
 #define CLI_TCP_PORT 5555
-#define CLI_ENDPOINT "127.0.0.1:5555"
+static std::string getCliEndpoint() {
+    return "127.0.0.1:5555";
+}
 #else
-// Для Linux оставляем старый UNIX-сокет
-#define CLI_SOCKET   "/tmp/vepc.sock"
-#define CLI_ENDPOINT CLI_SOCKET
+// Для Linux используем UNIX-сокет; путь можно переопределить через VEPC_CLI_SOCKET
+static std::string getCliSocketPath() {
+    const char* socketPath = std::getenv("VEPC_CLI_SOCKET");
+    if (socketPath && *socketPath) {
+        return std::string(socketPath);
+    }
+    return "/tmp/vepc.sock";
+}
+
+static std::string getCliEndpoint() {
+    return getCliSocketPath();
+}
 #endif
 
 // Цвета ANSI
@@ -2747,7 +2758,7 @@ std::string VNodeController::handleCliCommand(const std::string& cmd, bool& shou
         oss << "vEPC restart requested\n"
             << "Current Status : " << getStatus() << "\n"
             << "Reload Configs : " << CONFIG_FILE << ", " << MME_CONFIG_FILE << ", " << SGSN_CONFIG_FILE << ", " << INTERFACE_ADMIN_STATE_FILE << "\n"
-            << "CLI Endpoint   : " << CLI_ENDPOINT << "\n"
+            << "CLI Endpoint   : " << getCliEndpoint() << "\n"
             << "Next Step      : server threads will stop, config will be reloaded, and CLI will become available again after restart\n";
         return oss.str();
     }
@@ -2938,7 +2949,7 @@ void VNodeController::saveRuntimeStateToFile() {
     oss << "  \"schema_version\": " << RUNTIME_STATE_SCHEMA_VERSION << ",\n";
     oss << "  \"saved_at\": \"" << escapeJsonString(formatTimestamp(std::time(nullptr))) << "\",\n";
     oss << "  \"metadata\": {\n";
-    appendJsonStringField(oss, "cli_endpoint", CLI_ENDPOINT);
+    appendJsonStringField(oss, "cli_endpoint", getCliEndpoint());
     appendJsonStringField(oss, "status", getStatus());
     appendJsonIntField(oss, "interface_admin_state_count", interfaceStateCopy.size(), false);
     oss << "  },\n";
@@ -4812,7 +4823,7 @@ void VNodeController::cliServerThread() {
         cliListenSocket = sockfd;
     }
 
-    log("MAIN", std::string("CLI TCP ready: ") + CLI_ENDPOINT);
+    log("MAIN", std::string("CLI TCP ready: ") + getCliEndpoint());
 
     while (running) {
         SOCKET client = accept(sockfd, nullptr, nullptr);
@@ -4850,7 +4861,8 @@ void VNodeController::cliServerThread() {
     WSACleanup();
 #else
     // Linux/Unix: оригинальный вариант с UNIX domain socket
-    unlink(CLI_SOCKET);
+    const std::string cliSocketPath = getCliSocketPath();
+    unlink(cliSocketPath.c_str());
 
     int sockfd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (sockfd < 0) { perror("socket"); return; }
@@ -4861,7 +4873,12 @@ void VNodeController::cliServerThread() {
 
     struct sockaddr_un addr{};
     addr.sun_family = AF_UNIX;
-    strncpy(addr.sun_path, CLI_SOCKET, sizeof(addr.sun_path) - 1);
+    if (cliSocketPath.size() >= sizeof(addr.sun_path)) {
+        log("MAIN", "CLI socket path is too long: " + cliSocketPath);
+        close(sockfd);
+        return;
+    }
+    strncpy(addr.sun_path, cliSocketPath.c_str(), sizeof(addr.sun_path) - 1);
 
     if (bind(sockfd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
         perror("bind"); close(sockfd); return;
@@ -4875,7 +4892,7 @@ void VNodeController::cliServerThread() {
         cliListenSocket = sockfd;
     }
 
-    log("MAIN", "CLI socket ready: " CLI_SOCKET);
+    log("MAIN", "CLI socket ready: " + cliSocketPath);
 
     while (running) {
         int client = accept(sockfd, nullptr, nullptr);
@@ -4902,7 +4919,7 @@ void VNodeController::cliServerThread() {
                 running = false;
                 g_running = false;
                 closeCliListenSocket();
-                unlink(CLI_SOCKET);
+                unlink(cliSocketPath.c_str());
                 return;
             }
         }
@@ -4910,7 +4927,7 @@ void VNodeController::cliServerThread() {
     }
 
     closeCliListenSocket();
-    unlink(CLI_SOCKET);
+    unlink(cliSocketPath.c_str());
 #endif
 }
 
