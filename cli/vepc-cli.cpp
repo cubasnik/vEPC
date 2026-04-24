@@ -39,21 +39,10 @@ std::map<int, size_t> iface_num_to_idx;
 #ifdef _WIN32
 #define CLI_TCP_HOST    "127.0.0.1"
 #define CLI_TCP_PORT    5555
-static std::string getCliEndpoint() {
-    return "127.0.0.1:5555";
-}
+#define CLI_ENDPOINT    "127.0.0.1:5555"
 #else
-static std::string getCliSocketPath() {
-    const char* socketPath = getenv("VEPC_CLI_SOCKET");
-    if (socketPath && *socketPath) {
-        return std::string(socketPath);
-    }
-    return "/tmp/vepc.sock";
-}
-
-static std::string getCliEndpoint() {
-    return getCliSocketPath();
-}
+#define CLI_SOCKET      "/tmp/vepc.sock"
+#define CLI_ENDPOINT    CLI_SOCKET
 #endif
 
 #define INTERFACES_CONF "config/interfaces.conf"
@@ -1151,6 +1140,27 @@ static void showPortsFromLinux() {
         printKeyValueTable(allowedRows);
     }
 
+    // VLAN sub-interfaces under allowed traffic ports
+    std::vector<KeyValueEntry> vlanRows;
+    for (const auto& iface : all) {
+        const size_t dotPos = iface.find('.');
+        if (dotPos == std::string::npos) {
+            continue;
+        }
+        const std::string parent = iface.substr(0, dotPos);
+        const bool parentAllowed = std::find(allowed.begin(), allowed.end(), parent) != allowed.end();
+        if (!parentAllowed) {
+            continue;
+        }
+        const std::string state = hostInterfaceState(iface);
+        const std::string ip = getInterfaceIp(iface);
+        vlanRows.push_back({iface, state + " | " + (ip.empty() ? "N/A" : ip)});
+    }
+    if (!vlanRows.empty()) {
+        printSectionTitle("VLAN INTERFACES", 72);
+        printKeyValueTable(vlanRows);
+    }
+
     printPhysicalPortsSection();
 }
 
@@ -1653,7 +1663,7 @@ static void printHelp() {
         {"Interface", "shutdown | no shutdown | default | show interface <name> detail"}
     });
 
-    std::cout << "\n" << DIM << "Connecting to " << RST << CYAN << getCliEndpoint() << RST << "\n\n";
+    std::cout << "\n" << DIM << "Connecting to " << RST << CYAN << CLI_ENDPOINT << RST << "\n\n";
     printPrompt();
 }
 
@@ -1711,15 +1721,9 @@ static void sendToServer(const std::string& cmd) {
 #else
     int sock = socket(AF_UNIX, SOCK_STREAM, 0);
     if (sock < 0) { perror("socket"); return; }
-    const std::string cliSocketPath = getCliSocketPath();
     struct sockaddr_un addr{};
     addr.sun_family = AF_UNIX;
-    if (cliSocketPath.size() >= sizeof(addr.sun_path)) {
-        printLocalError("CLI socket path is too long: " + cliSocketPath);
-        close(sock);
-        return;
-    }
-    strncpy(addr.sun_path, cliSocketPath.c_str(), sizeof(addr.sun_path) - 1);
+    strncpy(addr.sun_path, CLI_SOCKET, sizeof(addr.sun_path) - 1);
 
     bool connected = false;
     constexpr int kConnectRetryCount = 12;
