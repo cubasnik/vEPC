@@ -453,6 +453,22 @@
         enabled: yes
 
     # ==================== Firewall Configuration ====================
+    - name: Allow SSH through UFW before enabling
+      ufw:
+        rule: allow
+        port: "22"
+        proto: tcp
+      when: ansible_distribution == "Ubuntu"
+      ignore_errors: yes
+
+    - name: Allow SSH CLI port through UFW
+      ufw:
+        rule: allow
+        port: "{{ ssh_cli_port | string }}"
+        proto: tcp
+      when: ansible_distribution == "Ubuntu" and ssh_cli_enabled | bool
+      ignore_errors: yes
+
     - name: Configure UFW firewall rules
       ufw:
         rule: allow

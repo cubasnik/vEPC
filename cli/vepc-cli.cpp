@@ -1120,15 +1120,19 @@ static void showPortsFromLinux() {
     std::set<std::string> existing(all.begin(), all.end());
     std::vector<KeyValueEntry> allowedRows;
     for (const auto& port : allowed) {
-        std::string state, mac;
-        const auto infoIt = portInfoMap.find(port);
-        if (infoIt != portInfoMap.end()) {
-            state = infoIt->second.state;
-            mac = infoIt->second.mac;
+        // Always read live state from sysfs; use cached info only as MAC fallback
+        const bool present = existing.find(port) != existing.end() || hostInterfaceExists(port);
+        const std::string state = present ? hostInterfaceState(port) : "NOT FOUND";
+        std::string mac;
+        if (present) {
+            mac = hostInterfaceMac(port);
+            if (mac.empty()) {
+                const auto infoIt = portInfoMap.find(port);
+                mac = (infoIt != portInfoMap.end()) ? infoIt->second.mac : "N/A";
+            }
         } else {
-            const bool present = existing.find(port) != existing.end() || hostInterfaceExists(port);
-            state = present ? hostInterfaceState(port) : "NOT FOUND";
-            mac = present ? hostInterfaceMac(port) : "N/A";
+            const auto infoIt = portInfoMap.find(port);
+            mac = (infoIt != portInfoMap.end()) ? infoIt->second.mac : "N/A";
         }
         allowedRows.push_back({port, state + " | " + mac});
     }
