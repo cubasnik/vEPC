@@ -2022,7 +2022,7 @@ static void printConfigHelp() {
     printKeyValueTable({
         {"Navigation", "interface <name> | end | exit"},
         {"Runtime", "restart | stop"},
-        {"Config", "set <key> <value> | hostname <name> | plmn <mcc> <mnc> | commit"},
+        {"Config", "set <key> <value> | hostname <name> | plmn <mcc> <mnc> | imsi series <name> <plmn> <series> [apn-profile] | imsi range <name> <plmn> <start> <end> [apn-profile] | commit"},
         {"Show", "show running-config | show logging | show interface [<name> [detail]] | show ports | show about"},
         {"Linux", "create-vlan <parent> <vlan-id> | delete-vlan <parent> <vlan-id> | add-traffic-port <name> | remove-traffic-port <name> | delete-interface <name>"},
         {"Info", "about"},
@@ -2210,6 +2210,7 @@ static std::vector<std::string> firstWordCommandsForMode(CliMode mode) {
         out.push_back("int");
         out.push_back("hostname");
         out.push_back("plmn");
+        out.push_back("imsi");
         out.push_back("commit");
         out.push_back("end");
     }
@@ -2282,6 +2283,20 @@ static std::vector<std::string> completionCandidates(
         candidates = {"001", "250", "255", "310"};
     } else if ((t0 == "plmn") && tokenIndex == 2) {
         candidates = {"01", "20", "260"};
+    } else if ((t0 == "imsi") && tokenIndex == 1) {
+        candidates = {"series", "range"};
+    } else if ((t0 == "imsi") && (t1 == "series" || t1 == "range") && tokenIndex == 2) {
+        candidates = {"enterprise", "mvno", "iot"};
+    } else if ((t0 == "imsi") && (t1 == "series" || t1 == "range") && tokenIndex == 3) {
+        candidates = {"25020", "310260", "00101"};
+    } else if ((t0 == "imsi") && t1 == "series" && tokenIndex == 4) {
+        candidates = {"99", "001", "12345"};
+    } else if ((t0 == "imsi") && t1 == "range" && tokenIndex == 4) {
+        candidates = {"3000000000", "1000000000"};
+    } else if ((t0 == "imsi") && t1 == "range" && tokenIndex == 5) {
+        candidates = {"3000000999", "1000000999"};
+    } else if ((t0 == "imsi") && (t1 == "series" || t1 == "range") && tokenIndex >= 5) {
+        candidates = {"internet", "ims", "corp"};
     } else if ((t0 == "set") && tokenIndex == 1) {
         candidates = {"mcc", "mnc", "s11-bind-ip", "gn-gtp-c-bind-ip", "gn-gtp-u-bind-ip"};
     } else if ((t0 == "set") && tokenIndex == 2) {
@@ -2557,6 +2572,10 @@ static bool isPlmnCommand(const std::vector<std::string>& tokens) {
     return !tokens.empty() && toLowerCopy(tokens[0]) == "plmn";
 }
 
+static bool isImsiCommand(const std::vector<std::string>& tokens) {
+    return !tokens.empty() && toLowerCopy(tokens[0]) == "imsi";
+}
+
 static bool isDigitsOnly(const std::string& value) {
     if (value.empty()) {
         return false;
@@ -2575,6 +2594,38 @@ static bool isValidMcc(const std::string& value) {
 
 static bool isValidMnc(const std::string& value) {
     return (value.size() == 2 || value.size() == 3) && isDigitsOnly(value);
+}
+
+static bool isValidPlmnToken(const std::string& value) {
+    return (value.size() == 5 || value.size() == 6) && isDigitsOnly(value);
+}
+
+static bool isValidImsiSeriesToken(const std::string& value) {
+    return value.size() >= 1 && value.size() <= 15 && isDigitsOnly(value);
+}
+
+static bool isValidImsiRangeToken(const std::string& value) {
+    return value.size() >= 5 && value.size() <= 15 && isDigitsOnly(value);
+}
+
+static bool isValidConfigToken(const std::string& value) {
+    if (value.empty() || value.size() > 64) {
+        return false;
+    }
+    for (char ch : value) {
+        const bool ok = std::isalnum(static_cast<unsigned char>(ch)) || ch == '-' || ch == '_' || ch == '.';
+        if (!ok) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool isLessOrEqualNumeric(const std::string& lhs, const std::string& rhs) {
+    if (lhs.size() != rhs.size()) {
+        return false;
+    }
+    return lhs <= rhs;
 }
 
 static bool isValidHostnameToken(const std::string& value) {
@@ -2674,7 +2725,7 @@ static bool isHelpCommand(const std::vector<std::string>& tokens) {
 
 static void printModeHint() {
     printLocalInfo("Press Tab to complete commands and show valid next arguments.");
-    printLocalInfo("Structured mode commands: configure terminal | interface <name> | hostname <name> | plmn <mcc> <mnc> | shutdown | no shutdown | ip address <ip[/prefix]> | bind <linux-iface> | end");
+    printLocalInfo("Structured mode commands: configure terminal | interface <name> | hostname <name> | plmn <mcc> <mnc> | imsi series <name> <plmn> <series> [apn-profile] | imsi range <name> <plmn> <start> <end> [apn-profile] | shutdown | no shutdown | ip address <ip[/prefix]> | bind <linux-iface> | end");
     printLocalInfo("Cisco-style commands: show [running-config | interface | ports | status | logging | about] | about");
 #ifndef _WIN32
     printLocalInfo("Linux interface commands: create-vlan <parent> <vlan-id> | delete-vlan <parent> <vlan-id>");
@@ -2978,6 +3029,105 @@ int main() {
                     sendToServer("set mnc " + tokens[2]);
                     printLocalInfo("PLMN updated: MCC=" + tokens[1] + " MNC=" + tokens[2]);
                 }
+                printPrompt(promptForMode(mode, selectedInterface));
+                continue;
+            }
+            if (mode == CliMode::Config && isImsiCommand(tokens)) {
+                if (tokens.size() < 5) {
+                    printLocalError("Usage: imsi series <name> <plmn> <series> [apn-profile] | imsi range <name> <plmn> <start> <end> [apn-profile]");
+                    printPrompt(promptForMode(mode, selectedInterface));
+                    continue;
+                }
+
+                const std::string type = toLowerCopy(tokens[1]);
+                const std::string name = tokens[2];
+                const std::string plmn = tokens[3];
+
+                if (type != "series" && type != "range") {
+                    printArgumentError("imsi", 1, tokens[1], "'series' or 'range'", "imsi series <name> <plmn> <series> [apn-profile] | imsi range <name> <plmn> <start> <end> [apn-profile]");
+                    printPrompt(promptForMode(mode, selectedInterface));
+                    continue;
+                }
+                if (!isValidConfigToken(name)) {
+                    printArgumentError("imsi", 2, name, "a group name with letters/digits/-/_.", "imsi " + type + " <name> <plmn> ...");
+                    printPrompt(promptForMode(mode, selectedInterface));
+                    continue;
+                }
+                if (!isValidPlmnToken(plmn)) {
+                    printArgumentError("imsi", 3, plmn, "a PLMN in MCCMNC format (5 or 6 digits)", "imsi " + type + " <name> <plmn> ...");
+                    printPrompt(promptForMode(mode, selectedInterface));
+                    continue;
+                }
+
+                if (type == "series") {
+                    if (tokens.size() != 5 && tokens.size() != 6) {
+                        printLocalError("Usage: imsi series <name> <plmn> <series> [apn-profile]");
+                        printPrompt(promptForMode(mode, selectedInterface));
+                        continue;
+                    }
+                    const std::string series = tokens[4];
+                    if (!isValidImsiSeriesToken(series)) {
+                        printArgumentError("imsi series", 4, series, "a numeric IMSI series (1..15 digits)", "imsi series <name> <plmn> <series> [apn-profile]");
+                        printPrompt(promptForMode(mode, selectedInterface));
+                        continue;
+                    }
+
+                    sendToServer("set imsi-group." + name + ".type series");
+                    sendToServer("set imsi-group." + name + ".plmn " + plmn);
+                    sendToServer("set imsi-group." + name + ".series " + series);
+
+                    if (tokens.size() == 6) {
+                        if (!isValidConfigToken(tokens[5])) {
+                            printArgumentError("imsi series", 5, tokens[5], "an APN profile name with letters/digits/-/_.", "imsi series <name> <plmn> <series> [apn-profile]");
+                            printPrompt(promptForMode(mode, selectedInterface));
+                            continue;
+                        }
+                        sendToServer("set imsi-group." + name + ".apn-profile " + tokens[5]);
+                    }
+
+                    printLocalInfo("IMSI series rule updated: group=" + name + " plmn=" + plmn + " series=" + series + (tokens.size() == 6 ? " apn=" + tokens[5] : ""));
+                    printPrompt(promptForMode(mode, selectedInterface));
+                    continue;
+                }
+
+                if (tokens.size() != 6 && tokens.size() != 7) {
+                    printLocalError("Usage: imsi range <name> <plmn> <start> <end> [apn-profile]");
+                    printPrompt(promptForMode(mode, selectedInterface));
+                    continue;
+                }
+                const std::string rangeStart = tokens[4];
+                const std::string rangeEnd = tokens[5];
+                if (!isValidImsiRangeToken(rangeStart)) {
+                    printArgumentError("imsi range", 4, rangeStart, "a numeric IMSI range-start (5..15 digits)", "imsi range <name> <plmn> <start> <end> [apn-profile]");
+                    printPrompt(promptForMode(mode, selectedInterface));
+                    continue;
+                }
+                if (!isValidImsiRangeToken(rangeEnd)) {
+                    printArgumentError("imsi range", 5, rangeEnd, "a numeric IMSI range-end (5..15 digits)", "imsi range <name> <plmn> <start> <end> [apn-profile]");
+                    printPrompt(promptForMode(mode, selectedInterface));
+                    continue;
+                }
+                if (rangeStart.size() != rangeEnd.size() || !isLessOrEqualNumeric(rangeStart, rangeEnd)) {
+                    printArgumentError("imsi range", 5, rangeEnd, "range-end >= range-start with equal digit length", "imsi range <name> <plmn> <start> <end> [apn-profile]");
+                    printPrompt(promptForMode(mode, selectedInterface));
+                    continue;
+                }
+
+                sendToServer("set imsi-group." + name + ".type range");
+                sendToServer("set imsi-group." + name + ".plmn " + plmn);
+                sendToServer("set imsi-group." + name + ".range-start " + rangeStart);
+                sendToServer("set imsi-group." + name + ".range-end " + rangeEnd);
+
+                if (tokens.size() == 7) {
+                    if (!isValidConfigToken(tokens[6])) {
+                        printArgumentError("imsi range", 6, tokens[6], "an APN profile name with letters/digits/-/_.", "imsi range <name> <plmn> <start> <end> [apn-profile]");
+                        printPrompt(promptForMode(mode, selectedInterface));
+                        continue;
+                    }
+                    sendToServer("set imsi-group." + name + ".apn-profile " + tokens[6]);
+                }
+
+                printLocalInfo("IMSI range rule updated: group=" + name + " plmn=" + plmn + " start=" + rangeStart + " end=" + rangeEnd + (tokens.size() == 7 ? " apn=" + tokens[6] : ""));
                 printPrompt(promptForMode(mode, selectedInterface));
                 continue;
             }

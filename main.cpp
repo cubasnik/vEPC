@@ -31,6 +31,7 @@
 #include "src/diameter_parser.h"
 #include "src/gtp_parser.h"
 #include "src/s1ap_parser.h"
+#include "src/subscriber_config.h"
 
 #ifdef _WIN32
 #define _WINSOCK_DEPRECATED_NO_WARNINGS
@@ -1330,6 +1331,9 @@ private:
     bool removePdpContext(uint32_t teid, PDPContext* removedContext = nullptr);
     void upsertUeContext(const UEContext& context);
     bool tryGetUeContext(const std::string& imsi, UEContext& context) const;
+        std::string resolveApnForImsi(const std::string& imsi,
+                                      const std::string& requestedApn,
+                                      std::string* matchedGroupName = nullptr) const;
     void clearRuntimeState();
     void saveRuntimeStateToFile();
     void loadRuntimeStateFromFile();
@@ -3285,6 +3289,13 @@ bool VNodeController::tryGetUeContext(const std::string& imsi, UEContext& contex
     return true;
 }
 
+std::string VNodeController::resolveApnForImsi(const std::string& imsi,
+                                               const std::string& requestedApn,
+                                               std::string* matchedGroupName) const {
+    std::lock_guard<std::mutex> lock(stateMutex);
+    return vepc::subscriber::resolveApnForImsi(config, imsi, requestedApn, matchedGroupName);
+}
+
 bool VNodeController::sendGtpResponse(NativeSocket socketHandle,
                                       const sockaddr_in& peerAddr,
                                       const std::vector<uint8_t>& response,
@@ -3352,6 +3363,8 @@ bool VNodeController::handleRealGtpMessage(NativeSocket socketHandle,
         context.updated_at = std::time(nullptr);
         context.imsi = request.imsi;
         context.apn = request.apn;
+        std::string matchedImsiGroup;
+        context.apn = resolveApnForImsi(request.imsi, request.apn, &matchedImsiGroup);
         context.ggsn_ip = request.ggsnIp;
         context.pdp_type = request.pdpType;
         context.has_pdp_type = request.hasPdpType;
@@ -3360,11 +3373,15 @@ bool VNodeController::handleRealGtpMessage(NativeSocket socketHandle,
         std::ostringstream parsedRequestLog;
         parsedRequestLog << "Create PDP request parsed from " << peerIp
                          << ": imsi=" << (request.hasImsi ? request.imsi : "n/a")
-                         << ", apn=" << (request.hasApn ? request.apn : "n/a")
+                         << ", apn-requested=" << (request.hasApn ? request.apn : "n/a")
+                         << ", apn-selected=" << (context.apn.empty() ? "n/a" : context.apn)
                          << ", pdp_type=" << (request.hasPdpType ? formatPdpTypeValue(context) : "n/a")
                          << ", ggsn_ip=" << (request.hasGgsnIp ? request.ggsnIp : "n/a")
                          << ", assigned_teid=0x" << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << context.teid
                          << std::dec << std::setfill(' ');
+        if (!matchedImsiGroup.empty()) {
+            parsedRequestLog << ", imsi-group=" << matchedImsiGroup;
+        }
         log("GTP", parsedRequestLog.str());
 
         const std::vector<uint8_t> response = vepc::buildCreatePdpContextResponse(header, context.teid);
