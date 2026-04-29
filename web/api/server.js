@@ -167,7 +167,8 @@ app.delete('/api/imsi/:name', requireAuth, async (req, res) => {
   const name = String(req.params.name || '').trim();
   if (!name) return res.status(400).json({ ok: false, reason: 'missing name' });
   const fields = ['type','plmn','series','range-start','range-end','apn-profile','count'];
-  const cmds = fields.map(f => `set imsi-group.${name}.${f} ``).map(s => s.replace(/``/, ''));
+  // create commands to clear each field (set to empty)
+  const cmds = fields.map(f => `set imsi-group.${name}.${f} `);
   // send clearing commands (set to empty)
   try {
     const out = await execCliCommand(cmds.join('\n') + '\n');
