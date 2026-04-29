@@ -3,6 +3,7 @@ import { Layout, Typography, Row, Col, Card, Descriptions, Tag } from 'antd'
 import dayjs from 'dayjs'
 import 'antd/dist/reset.css'
 import ImsiManager from './ImsiManager'
+import ShowConfig from './ShowConfig'
 
 const { Header, Content } = Layout
 const { Title } = Typography
@@ -34,7 +35,10 @@ export default function App() {
             </Card>
           </Col>
           <Col xs={24} lg={16}>
-            <ImsiManager />
+            <div>
+              <ImsiManager />
+              <ShowConfig />
+            </div>
           </Col>
         </Row>
       </Content>
