@@ -403,8 +403,10 @@
       shell: |
         cd {{ vepc_repo_path }}
         docker compose up -d --force-recreate --remove-orphans
-      become: no
+      become: yes
       become_user: "{{ vepc_user }}"
+      args:
+        chdir: "{{ vepc_repo_path }}"
       environment:
         REPO_URL: "{{ vepc_repo_url }}"
         REPO_BRANCH: "{{ vepc_repo_branch }}"
