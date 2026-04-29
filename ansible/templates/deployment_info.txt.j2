@@ -73,17 +73,17 @@ Show configuration:
 View system logs:
   docker exec {{ vepc_container_name }} /app/vepc-cli log
 
-Restart service:
-  sudo systemctl restart vepc
+Restart container:
+  cd {{ vepc_repo_path }} && docker compose restart vepc
 
-Stop service:
-  sudo systemctl stop vepc
+Stop container:
+  cd {{ vepc_repo_path }} && docker compose stop vepc
 
-Start service:
-  sudo systemctl start vepc
+Start container:
+  cd {{ vepc_repo_path }} && docker compose up -d vepc
 
-View systemd logs:
-  journalctl -u vepc -f
+View container logs:
+  docker logs -f {{ vepc_container_name }}
 
 ================================================================================
                     CONFIGURATION FILES

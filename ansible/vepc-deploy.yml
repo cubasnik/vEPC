@@ -434,23 +434,10 @@
       ignore_errors: yes
 
     # ==================== Systemd Service ====================
-    - name: Create systemd service file for vEPC
-      template:
-        src: "vepc.service.j2"
-        dest: "/etc/systemd/system/vepc.service"
-        mode: '0644'
-      notify:
-        - reload systemd
-        - enable vepc service
-
-    - name: Reload systemd daemon
-      systemd:
-        daemon_reload: yes
-
-    - name: Enable vEPC service
-      systemd:
-        name: vepc
-        enabled: yes
+    # Note: vEPC is managed via Docker Compose only. Previous behavior
+    # that created and enabled a systemd unit for vepc has been removed
+    # to avoid duplicate service management. Use docker compose to control
+    # the vepc container (see handlers and documentation above).
 
     # ==================== Firewall Configuration ====================
     - name: Allow SSH through UFW before enabling
@@ -680,8 +667,8 @@
           View logs:
           $ docker logs -f {{ vepc_container_name }}
           
-          Restart the service:
-          $ sudo systemctl restart vepc
+          Restart the service (docker):
+          $ docker compose -f {{ vepc_repo_path }}/docker-compose.yml restart vepc
           ============================================
 
   handlers:
@@ -694,10 +681,7 @@
         name: ssh
         state: restarted
 
-    - name: enable vepc service
-      systemd:
-        name: vepc
-        enabled: yes
+    # 'enable vepc service' handler removed; vepc managed by docker-compose
 
     - name: restart vepc container
       shell: |
