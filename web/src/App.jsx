@@ -4,6 +4,7 @@ import dayjs from 'dayjs'
 import 'antd/dist/reset.css'
 import ImsiManager from './ImsiManager'
 import ShowConfig from './ShowConfig'
+import Interfaces from './Interfaces'
 
 const { Header, Content } = Layout
 const { Title } = Typography
@@ -38,6 +39,7 @@ export default function App() {
             <div>
               <ImsiManager />
               <ShowConfig />
+              <Interfaces />
             </div>
           </Col>
         </Row>

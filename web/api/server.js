@@ -111,6 +111,25 @@ function parseImsiGroups(runningConfigText) {
   return groups;
 }
 
+// Parse interface overview table produced by `show iface`
+function parseInterfaces(text) {
+  const lines = text.split(/\r?\n/)
+  const out = []
+  for (const raw of lines) {
+    const line = raw.replace(/\t/g, ' ')
+    if (line.length < 86) continue
+    const name = line.substring(0, 12).trim()
+    const proto = line.substring(12, 24).trim()
+    const address = line.substring(24, 46).trim()
+    const admin = line.substring(46, 58).trim()
+    const oper = line.substring(58, 70).trim()
+    const implementation = line.substring(70, 86).trim()
+    const peer = line.substring(86).trim()
+    if (name) out.push({ name, proto, address, admin, oper, implementation, peer })
+  }
+  return out
+}
+
 // GET /api/imsi - list IMSI groups
 app.get('/api/imsi', requireAuth, async (req, res) => {
   try {
@@ -183,6 +202,17 @@ const DIST = path.join(__dirname, '..', 'dist')
 
 app.use('/api/ping', (req, res) => {
   res.json({ok: true, time: new Date().toISOString()})
+})
+
+// GET /api/interfaces - parse `show iface` output into structured JSON
+app.get('/api/interfaces', requireAuth, async (req, res) => {
+  try {
+    const out = await execCliCommand('show iface\n')
+    const ifaces = parseInterfaces(out)
+    res.json({ ok: true, interfaces: ifaces })
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: e.message })
+  }
 })
 
 app.get('/api/config', (req, res) => {
