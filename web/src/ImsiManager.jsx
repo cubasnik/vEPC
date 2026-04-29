@@ -1,4 +1,7 @@
 import React from 'react'
+import { Table, Button, Form, Input, Select, Card, Space, Modal, message, Spin } from 'antd'
+
+const { Option } = Select
 
 function ApiFetch(path, opts = {}, token) {
   const headers = opts.headers || {}
@@ -9,112 +12,105 @@ function ApiFetch(path, opts = {}, token) {
 export default function ImsiManager() {
   const [groups, setGroups] = React.useState([])
   const [loading, setLoading] = React.useState(false)
-  const [error, setError] = React.useState(null)
   const [token, setToken] = React.useState('')
-
-  const [form, setForm] = React.useState({
-    name: '', kind: 'series', plmns: '', series: '', count: 10, start: '', end: '', apnProfile: ''
-  })
+  const [form] = Form.useForm()
+  const [modalVisible, setModalVisible] = React.useState(false)
 
   const load = React.useCallback(() => {
-    setLoading(true); setError(null)
+    setLoading(true)
     ApiFetch('/api/imsi', {}, token).then(r => r.json()).then(j => {
       if (j.ok) setGroups(j.groups || [])
-      else setError(j.reason || 'unknown')
-    }).catch(e => setError(e.message)).finally(() => setLoading(false))
+      else message.error(j.reason || 'failed to load')
+    }).catch(e => message.error(e.message)).finally(() => setLoading(false))
   }, [token])
 
   React.useEffect(() => { load() }, [load])
 
-  function onChange(e) {
-    const { name, value } = e.target
-    setForm(prev => ({ ...prev, [name]: value }))
-  }
-
-  async function createGroup(e) {
-    e.preventDefault()
-    setError(null)
-    const body = {
-      name: form.name,
-      kind: form.kind,
-      plmns: form.plmns,
-      apnProfile: form.apnProfile
-    }
-    if (form.kind === 'series') { body.series = form.series; body.count = Number(form.count || 0) }
-    else { body.start = form.start; body.end = form.end }
+  async function createGroup(values) {
     try {
+      const body = Object.assign({}, values)
       const res = await ApiFetch('/api/imsi', { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } }, token)
       const j = await res.json()
       if (!j.ok) throw new Error(j.reason || 'failed')
-      setForm({ name: '', kind: 'series', plmns: '', series: '', count: 10, start: '', end: '', apnProfile: '' })
+      message.success('IMSI group created')
+      setModalVisible(false)
+      form.resetFields()
       load()
-    } catch (e) { setError(e.message) }
+    } catch (e) { message.error(e.message) }
   }
 
-  async function removeGroup(name) {
-    if (!confirm(`Delete IMSI group ${name}?`)) return
-    setError(null)
-    try {
-      const res = await ApiFetch('/api/imsi/' + encodeURIComponent(name), { method: 'DELETE' }, token)
-      const j = await res.json()
-      if (!j.ok) throw new Error(j.reason || 'failed')
-      load()
-    } catch (e) { setError(e.message) }
+  function confirmDelete(name) {
+    Modal.confirm({
+      title: `Delete IMSI group ${name}?`,
+      okText: 'Delete',
+      okType: 'danger',
+      onOk: async () => {
+        try {
+          const res = await ApiFetch('/api/imsi/' + encodeURIComponent(name), { method: 'DELETE' }, token)
+          const j = await res.json()
+          if (!j.ok) throw new Error(j.reason || 'failed')
+          message.success('Deleted')
+          load()
+        } catch (e) { message.error(e.message) }
+      }
+    })
   }
+
+  const columns = [
+    { title: 'Name', dataIndex: 'name', key: 'name' },
+    { title: 'Type', dataIndex: 'type', key: 'type' },
+    { title: 'PLMN', dataIndex: 'plmn', key: 'plmn' },
+    { title: 'Details', key: 'details', render: (_, r) => r.type === 'range' ? `${r.rangeStart}-${r.rangeEnd}` : r.series },
+    { title: 'APN', dataIndex: 'apnProfile', key: 'apnProfile' },
+    { title: 'Actions', key: 'actions', render: (_, r) => (<Space><Button danger size="small" onClick={()=>confirmDelete(r.name)}>Delete</Button></Space>) }
+  ]
 
   return (
-    <div>
-      <h2>IMSI Manager</h2>
-      <div style={{marginBottom:12}}>
-        <label>API Token (optional): <input value={token} onChange={e=>setToken(e.target.value)} style={{width:320}}/></label>
-        <button onClick={load} style={{marginLeft:8}}>Reload</button>
-      </div>
+    <Card title="IMSI Groups" extra={<Space><Input placeholder="API token (optional)" value={token} onChange={e=>setToken(e.target.value)} style={{width:260}} /><Button onClick={load}>Reload</Button><Button type="primary" onClick={()=>setModalVisible(true)}>Create</Button></Space>}>
+      <Spin spinning={loading}>
+        <Table rowKey="name" dataSource={groups} columns={columns} pagination={false} />
+      </Spin>
 
-      <section className="card">
-        <h3>Existing Groups</h3>
-        {loading ? <div>Loading...</div> : null}
-        {error ? <div style={{color:'red'}}>{error}</div> : null}
-        <ul>
-          {groups.map(g => (
-            <li key={g.name}>
-              <strong>{g.name}</strong> — {g.type || 'unknown'} plmn:{g.plmn}
-              {g.type==='range' ? ` range:${g.rangeStart}-${g.rangeEnd}` : ''}
-              {g.type==='series' ? ` series:${g.series}` : ''}
-              {g.apnProfile ? ` apn:${g.apnProfile}` : ''}
-              <button style={{marginLeft:8}} onClick={()=>removeGroup(g.name)}>Delete</button>
-            </li>
-          ))}
-        </ul>
-      </section>
+      <Modal title="Create IMSI Group" open={modalVisible} onCancel={()=>setModalVisible(false)} footer={null}>
+        <Form form={form} layout="vertical" onFinish={createGroup} initialValues={{ kind: 'series', count: 10 }}>
+          <Form.Item name="name" label="Name" rules={[{ required: true }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item name="kind" label="Kind" rules={[{ required: true }]}>
+            <Select>
+              <Option value="series">Series</Option>
+              <Option value="range">Range</Option>
+            </Select>
+          </Form.Item>
+          <Form.Item name="plmns" label="PLMNs (comma-separated)" rules={[{ required: true }]}>
+            <Input />
+          </Form.Item>
 
-      <section className="card">
-        <h3>Create Group</h3>
-        <form onSubmit={createGroup}>
-          <div><label>Name: <input name="name" value={form.name} onChange={onChange} required/></label></div>
-          <div>
-            <label>Kind: 
-              <select name="kind" value={form.kind} onChange={onChange}>
-                <option value="series">Series</option>
-                <option value="range">Range</option>
-              </select>
-            </label>
-          </div>
-          <div><label>PLMNs (comma-separated): <input name="plmns" value={form.plmns} onChange={onChange} required/></label></div>
-          {form.kind === 'series' ? (
-            <>
-              <div><label>Series prefix: <input name="series" value={form.series} onChange={onChange} required/></label></div>
-              <div><label>Count: <input type="number" name="count" value={form.count} onChange={onChange}/></label></div>
-            </>
-          ) : (
-            <>
-              <div><label>Start MSIN: <input name="start" value={form.start} onChange={onChange} required/></label></div>
-              <div><label>End MSIN: <input name="end" value={form.end} onChange={onChange} required/></label></div>
-            </>
-          )}
-          <div><label>APN Profile (optional): <input name="apnProfile" value={form.apnProfile} onChange={onChange}/></label></div>
-          <div style={{marginTop:8}}><button type="submit">Create</button></div>
-        </form>
-      </section>
-    </div>
+          <Form.Item shouldUpdate={(prev, cur) => prev.kind !== cur.kind} noStyle>
+            {() => (
+              form.getFieldValue('kind') === 'series' ? (
+                <>
+                  <Form.Item name="series" label="Series prefix" rules={[{ required: true }]}><Input /></Form.Item>
+                  <Form.Item name="count" label="Count"><Input type="number" /></Form.Item>
+                </>
+              ) : (
+                <>
+                  <Form.Item name="start" label="Start MSIN" rules={[{ required: true }]}><Input /></Form.Item>
+                  <Form.Item name="end" label="End MSIN" rules={[{ required: true }]}><Input /></Form.Item>
+                </>
+              )
+            )}
+          </Form.Item>
+
+          <Form.Item name="apnProfile" label="APN Profile (optional)"><Input /></Form.Item>
+          <Form.Item>
+            <Space>
+              <Button onClick={()=>setModalVisible(false)}>Cancel</Button>
+              <Button type="primary" htmlType="submit">Create</Button>
+            </Space>
+          </Form.Item>
+        </Form>
+      </Modal>
+    </Card>
   )
 }

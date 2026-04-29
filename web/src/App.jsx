@@ -1,5 +1,10 @@
 import React from 'react'
+import { Layout, Typography, Row, Col, Card } from 'antd'
+import 'antd/dist/reset.css'
 import ImsiManager from './ImsiManager'
+
+const { Header, Content } = Layout
+const { Title } = Typography
 
 export default function App() {
   const [ping, setPing] = React.useState(null)
@@ -9,18 +14,22 @@ export default function App() {
   }, [])
 
   return (
-    <div className="app">
-      <header className="header">
-        <img src="/logo-placeholder.svg" alt="EricssonSoft" className="logo"/>
-        <h1>EricssonSoft vEPC UI (placeholder)</h1>
-      </header>
-      <main>
-        <section className="card">
-          <h2>Status</h2>
-          <pre>{ping ? JSON.stringify(ping, null, 2) : 'loading...'}</pre>
-        </section>
-        <ImsiManager />
-      </main>
-    </div>
+    <Layout style={{ minHeight: '100vh' }}>
+      <Header style={{ background: '#fff', padding: '12px 20px' }}>
+        <Title level={4} style={{ margin: 0 }}>EricssonSoft vEPC</Title>
+      </Header>
+      <Content style={{ padding: 20 }}>
+        <Row gutter={16}>
+          <Col xs={24} lg={8}>
+            <Card title="Status">
+              <pre>{ping ? JSON.stringify(ping, null, 2) : 'loading...'}</pre>
+            </Card>
+          </Col>
+          <Col xs={24} lg={16}>
+            <ImsiManager />
+          </Col>
+        </Row>
+      </Content>
+    </Layout>
   )
 }
