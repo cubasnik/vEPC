@@ -347,8 +347,7 @@
       shell: |
         cd {{ vepc_repo_path }}
         docker compose build {% if vepc_force_rebuild | bool %}--no-cache {% endif %}--pull vepc
-      become: true
-      become_user: "{{ vepc_user }}"
+      become: yes
       register: docker_build
       changed_when: true
       notify: restart vepc container
@@ -404,7 +403,6 @@
         cd {{ vepc_repo_path }}
         docker compose up -d --force-recreate --remove-orphans
       become: yes
-      become_user: "{{ vepc_user }}"
       args:
         chdir: "{{ vepc_repo_path }}"
       environment:
