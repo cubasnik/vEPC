@@ -47,6 +47,24 @@ services:
         max-file: "3"
         labels: "vepc=core"
 
+  vepc-web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    image: vepc-vepc-web:latest
+    container_name: vepc-web
+    environment:
+      - NODE_ENV=production
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "vepc=web"
+
 volumes:
   vepc-logs:
     driver: local
