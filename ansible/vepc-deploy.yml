@@ -426,8 +426,6 @@
         if docker ps -a --filter "name={{ vepc_old_container_name }}" -q | grep -q .; then
           docker rm -f {{ vepc_old_container_name }} || true
         fi
-      args:
-        warn: false
 
     # ==================== Container Deployment ====================
     - name: Start vEPC container with docker compose
