@@ -1,5 +1,6 @@
 import React from 'react'
-import { Layout, Typography, Row, Col, Card } from 'antd'
+import { Layout, Typography, Row, Col, Card, Descriptions, Tag } from 'antd'
+import dayjs from 'dayjs'
 import 'antd/dist/reset.css'
 import ImsiManager from './ImsiManager'
 
@@ -22,7 +23,14 @@ export default function App() {
         <Row gutter={16}>
           <Col xs={24} lg={8}>
             <Card title="Status">
-              <pre>{ping ? JSON.stringify(ping, null, 2) : 'loading...'}</pre>
+              {ping ? (
+                <Descriptions column={1} size="small">
+                  <Descriptions.Item label="API">{ping.ok ? <Tag color="green">OK</Tag> : <Tag color="red">DOWN</Tag>}</Descriptions.Item>
+                  <Descriptions.Item label="Time">{ping.time ? dayjs(ping.time).format('YYYY-MM-DD HH:mm:ss') : 'unknown'}</Descriptions.Item>
+                </Descriptions>
+              ) : (
+                <div>loading...</div>
+              )}
             </Card>
           </Col>
           <Col xs={24} lg={16}>
