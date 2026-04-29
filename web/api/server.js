@@ -215,6 +215,103 @@ app.get('/api/interfaces', requireAuth, async (req, res) => {
   }
 })
 
+// Parse runtime/state output into structured JSON
+function parseRuntime(text) {
+  const lines = text.split(/\r?\n/)
+  const result = { pdpContexts: [], endpointTelemetry: [], ueContexts: [] }
+  let i = 0
+
+  function consumeBlock(startRegex) {
+    const block = []
+    while (i < lines.length) {
+      const l = lines[i]
+      if (startRegex && startRegex.test(l)) break
+      block.push(l)
+      i++
+    }
+    return block
+  }
+
+  // simple state machine
+  while (i < lines.length) {
+    const line = lines[i].trim()
+    if (line.startsWith('PDP contexts:')) {
+      i++
+      // read until next blank or next section
+      while (i < lines.length && lines[i].trim().startsWith('- TEID:')) {
+        const teidLine = lines[i].trim()
+        const m = teidLine.match(/- TEID:\s*0x([0-9A-Fa-f]+)/)
+        const entry = {}
+        if (m) { entry.teid = parseInt(m[1], 16) }
+        i++
+        while (i < lines.length && lines[i].startsWith('  ')) {
+          const s = lines[i].trim()
+          const parts = s.split(':')
+          if (parts.length >= 2) {
+            const key = parts[0].trim()
+            const val = parts.slice(1).join(':').trim()
+            entry[key] = val
+          }
+          i++
+        }
+        result.pdpContexts.push(entry)
+      }
+      continue
+    }
+
+    if (line.startsWith('Endpoint telemetry:')) {
+      i++
+      while (i < lines.length && lines[i].trim().startsWith('- Name:')) {
+        const entry = {}
+        // lines for one endpoint
+        while (i < lines.length && (lines[i].startsWith('- ') || lines[i].startsWith('  '))) {
+          const s = lines[i].trim()
+          const parts = s.split(':')
+          if (parts.length >= 2) {
+            const key = parts[0].replace(/^- /, '').trim()
+            const val = parts.slice(1).join(':').trim()
+            entry[key] = val
+          }
+          i++
+        }
+        result.endpointTelemetry.push(entry)
+      }
+      continue
+    }
+
+    if (line.startsWith('UE contexts:')) {
+      i++
+      while (i < lines.length && lines[i].trim().startsWith('- IMSI:')) {
+        const entry = {}
+        // first line
+        while (i < lines.length && (lines[i].startsWith('- ') || lines[i].startsWith('  '))) {
+          const s = lines[i].trim()
+          const parts = s.split(':')
+          if (parts.length >= 2) entry[parts[0].replace(/^- /, '').trim()] = parts.slice(1).join(':').trim()
+          i++
+        }
+        result.ueContexts.push(entry)
+      }
+      continue
+    }
+
+    i++
+  }
+
+  return result
+}
+
+// GET /api/runtime - structured runtime/state
+app.get('/api/runtime', requireAuth, async (req, res) => {
+  try {
+    const out = await execCliCommand('show state\n')
+    const parsed = parseRuntime(out)
+    res.json({ ok: true, raw: out, ...parsed })
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: e.message })
+  }
+})
+
 app.get('/api/config', (req, res) => {
   // Try to read mounted config if available
   try {

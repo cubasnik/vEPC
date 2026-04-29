@@ -5,6 +5,7 @@ import 'antd/dist/reset.css'
 import ImsiManager from './ImsiManager'
 import ShowConfig from './ShowConfig'
 import Interfaces from './Interfaces'
+import Runtime from './Runtime'
 
 const { Header, Content } = Layout
 const { Title } = Typography
@@ -40,6 +41,7 @@ export default function App() {
               <ImsiManager />
               <ShowConfig />
               <Interfaces />
+              <Runtime />
             </div>
           </Col>
         </Row>
