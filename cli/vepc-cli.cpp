@@ -35,6 +35,8 @@ std::map<int, size_t> iface_num_to_idx;
 #endif
 
 #include "cisco_cli_commands.h"
+// imsi module CLI hooks
+#include "../src/imsi_module.h"
 
 #ifdef _WIN32
 #define CLI_TCP_HOST    "127.0.0.1"
@@ -2597,7 +2599,20 @@ static bool isValidMnc(const std::string& value) {
 }
 
 static bool isValidPlmnToken(const std::string& value) {
-    return (value.size() == 5 || value.size() == 6) && isDigitsOnly(value);
+    // accept single PLMN or comma-separated list of PLMNs
+    std::string token;
+    for (size_t i = 0; i < value.size(); ++i) {
+        const char c = value[i];
+        if (c == ',') {
+            if (token.empty()) return false;
+            if (!(token.size() == 5 || token.size() == 6) || !isDigitsOnly(token)) return false;
+            token.clear();
+        } else if (!std::isspace(static_cast<unsigned char>(c))) {
+            token.push_back(c);
+        }
+    }
+    if (token.empty()) return false;
+    return (token.size() == 5 || token.size() == 6) && isDigitsOnly(token);
 }
 
 static bool isValidImsiSeriesToken(const std::string& value) {
@@ -2765,6 +2780,8 @@ static std::string bindInterfaceKeyForInterfaceName(const std::string& ifaceName
 
 int main() {
     loadInterfaces();
+    // register imsi CLI commands (module)
+    vepc::registerImsiCliCommands();
     const bool interactiveSession = isInteractiveSession();
 #if !defined(_WIN32) && defined(VEPC_USE_READLINE)
     g_suppressPromptOutput = interactiveSession;

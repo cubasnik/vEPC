@@ -305,6 +305,18 @@ if (NOT WIN32)
     endif()
 endif()
 
+# IMSI module
+add_library(imsi_module src/imsi_module.cpp)
+target_include_directories(imsi_module PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+if (TARGET vepc)
+    target_link_libraries(vepc PRIVATE imsi_module)
+endif()
+
+# test for imsi module
+add_executable(test-imsi-module tests/imsi_module_test.cpp)
+target_link_libraries(test-imsi-module PRIVATE imsi_module)
+
 # Windows: линковка с Winsock2
 if (WIN32)
     target_link_libraries(vepc ws2_32 iphlpapi)
