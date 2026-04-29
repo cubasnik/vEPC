@@ -55,8 +55,14 @@ services:
     container_name: vepc-web
     environment:
       - NODE_ENV=production
+      # allow overriding the CLI socket path and wait timeout from compose
+      - CLI_SOCKET=/tmp/vepc.sock
+      - WAIT_FOR_SOCKET_TIMEOUT=60
     ports:
       - "3000:3000"
+    volumes:
+      # bind host vepc unix socket into web container for CLI IPC
+      - /tmp/vepc.sock:/tmp/vepc.sock:ro
     restart: unless-stopped
     logging:
       driver: "json-file"
