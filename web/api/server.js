@@ -38,9 +38,69 @@ function requireAuth(req, res, next) {
 
 function execCliCommand(cmd, timeoutMs = 5000) {
   const retryDelay = 200; // ms between retries when socket missing
-  return new Promise((resolve, reject) => {
-    const start = Date.now();
-    let finished = false;
+    return new Promise((resolve, reject) => {
+      const start = Date.now();
+      let finished = false;
+      let attempt = 0;
+      const minDelay = 100; // ms
+      const maxDelay = 2000; // ms
+      const timeoutMs = 15000; // Increase overall timeout to 15s
+
+      function tryOnce() {
+        if (finished) return;
+        const elapsed = Date.now() - start;
+        if (elapsed >= timeoutMs) {
+          finished = true;
+          return reject(new Error('cli timeout'));
+        }
+
+        attempt += 1;
+        const client = net.createConnection({ path: CLI_SOCKET });
+        let respBuf = '';
+        let to = setTimeout(() => {
+          if (finished) return;
+          finished = true;
+          try { client.end(); } catch (e) {}
+          reject(new Error('cli timeout'));
+        }, Math.max(1000, timeoutMs - elapsed));
+
+        client.on('connect', () => {
+          try { client.write(cmd); } catch (e) {}
+        });
+
+        client.on('data', (chunk) => { respBuf += chunk.toString(); });
+
+        const finishWith = (err, result) => {
+          if (finished) return;
+          finished = true;
+          clearTimeout(to);
+          if (err) return reject(err);
+          return resolve(result);
+        };
+
+        client.on('end', () => finishWith(null, respBuf));
+        client.on('close', () => finishWith(null, respBuf));
+
+        client.on('error', (err) => {
+          clearTimeout(to);
+          if (finished) return;
+          // Retry for common transient socket errors (service not yet started)
+          if (err && (err.code === 'ENOENT' || err.code === 'ECONNREFUSED' || err.code === 'ECONNRESET')) {
+            try { client.end(); } catch (e) {}
+            // exponential backoff
+            const delay = Math.min(maxDelay, Math.max(minDelay, Math.pow(2, attempt) * minDelay));
+            console.warn(`[web/api] CLI socket not ready (attempt ${attempt}): ${err.code}, retrying in ${delay}ms`);
+            setTimeout(() => { tryOnce(); }, delay);
+            return;
+          }
+          finished = true;
+          reject(err);
+        });
+      }
+
+      tryOnce();
+    });
+}
 
     function tryOnce() {
       if (finished) return;
