@@ -318,6 +318,15 @@
         force: true
       become: true
       become_user: "{{ vepc_user }}"
+    - name: Ensure repository matches origin/{{ vepc_repo_branch }} (force)
+      shell: |
+        git fetch --all --prune
+        git reset --hard origin/{{ vepc_repo_branch }}
+        git clean -fdx
+      args:
+        chdir: "{{ vepc_repo_path }}"
+      become: true
+      become_user: "{{ vepc_user }}"
     - name: Ensure scripts directory exists after repository setup
       file:
         path: "{{ vepc_repo_path }}/scripts"
@@ -346,11 +355,21 @@
     - name: Build Docker image from Dockerfile
       shell: |
         cd {{ vepc_repo_path }}
-        docker compose build {% if vepc_force_rebuild | bool %}--no-cache {% endif %}--pull vepc
+        # Ensure web image rebuilt to pick up any frontend changes
+        docker compose build {% if vepc_force_rebuild | bool %}--no-cache {% endif %}--pull vepc vepc-web || true
       become: yes
       register: docker_build
       changed_when: true
       notify: restart vepc container
+    - name: Recreate vepc-web service to apply new build
+      shell: |
+        cd {{ vepc_repo_path }}
+        docker compose up -d --no-deps --force-recreate vepc-web
+      become: yes
+      args:
+        chdir: "{{ vepc_repo_path }}"
+      register: vepc_web_up
+      changed_when: "'Recreated' in vepc_web_up.stdout or 'Creating' in vepc_web_up.stdout or 'Starting' in vepc_web_up.stdout"
 
     # ==================== Configuration ====================
     - name: Copy vEPC configuration files
