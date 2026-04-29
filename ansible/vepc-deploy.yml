@@ -47,6 +47,9 @@
     docker_registry: "docker.io"
     vepc_docker_image: "vepc:latest"
     vepc_container_name: "vepc-mme-sgsn"
+    # Optional removal of legacy container instances (set true to remove old containers)
+    vepc_remove_old_container: true
+    vepc_old_container_name: "vepc-mme-sgsn"
     
     # Network configuration
     enable_network_namespaces: true
@@ -415,6 +418,16 @@
         group: "{{ vepc_group }}"
         mode: '0644'
       notify: restart vepc container
+
+    - name: Remove legacy vepc container if requested
+      when: vepc_remove_old_container | bool
+      become: yes
+      shell: |
+        if docker ps -a --filter "name={{ vepc_old_container_name }}" -q | grep -q .; then
+          docker rm -f {{ vepc_old_container_name }} || true
+        fi
+      args:
+        warn: false
 
     # ==================== Container Deployment ====================
     - name: Start vEPC container with docker compose
