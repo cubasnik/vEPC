@@ -24,6 +24,8 @@ services:
       - ./config:/etc/vepc
       # Logs directory
       - vepc-logs:/var/log/vepc
+      # Shared socket directory (mounted into /tmp inside containers)
+      - ./sockets:/tmp
       # Optional: share network namespace for host interface access
       # - /etc/sysctl.conf:/etc/sysctl.conf:ro
     
@@ -55,6 +57,22 @@ services:
         max-size: "10m"
         max-file: "3"
         labels: "vepc=core"
+
+  vepc-web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: vepc-web
+    ports:
+      - "3000:3000"
+    depends_on:
+      - vepc
+    volumes:
+      - ./config:/etc/vepc:ro
+      - ./sockets:/tmp:rw
+    environment:
+      - NODE_ENV=production
+    restart: unless-stopped
 
 volumes:
   vepc-logs:

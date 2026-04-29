@@ -371,6 +371,16 @@ static void printTableSectionRow(const std::string& title, size_t keyWidth, size
     std::cout << DIM << " |" << RST << "\n";
 }
 
+static std::string subSectionForKey(const std::string& key) {
+    const std::string lower = toLowerCopy(key);
+    if (lower.find("s1ap") != std::string::npos || lower.find("s1ap-") != std::string::npos) return "S1AP";
+    if (lower.find("s11") != std::string::npos) return "S11";
+    if (lower.find("gn-gtp") != std::string::npos || lower.find("gtp") != std::string::npos) return "GTP";
+    if (lower.find("bind-iface") != std::string::npos || lower.find("bind-ip") != std::string::npos) return "Bindings";
+    if (lower.find("interface") != std::string::npos) return "Interfaces";
+    return "General";
+}
+
 static void printGroupedConfigTable(const std::vector<KeyValueEntry>& entries) {
     if (entries.empty()) {
         return;
@@ -417,19 +427,27 @@ static void printGroupedConfigTable(const std::vector<KeyValueEntry>& entries) {
     std::cout << DIM << " |" << RST << "\n";
     printTableRule(keyWidth, valueWidth);
 
-    const auto printSection = [&](const std::string& title, const std::vector<KeyValueEntry>& sectionEntries) {
-        if (sectionEntries.empty()) {
-            return;
+    const auto printSectionWithSub = [&](const std::string& title, const std::vector<KeyValueEntry>& sectionEntries) {
+        if (sectionEntries.empty()) return;
+        // group into subsections
+        std::map<std::string, std::vector<KeyValueEntry>> subs;
+        for (const auto &e : sectionEntries) {
+            subs[subSectionForKey(e.key)].push_back(e);
         }
         printTableSectionRow(title, keyWidth, valueWidth);
         printTableRule(keyWidth, valueWidth);
-        printRows(sectionEntries);
-        printTableRule(keyWidth, valueWidth);
+        for (const auto &p : subs) {
+            const std::string subTitle = title + " - " + p.first;
+            printTableSectionRow(subTitle, keyWidth, valueWidth);
+            printTableRule(keyWidth, valueWidth);
+            printRows(p.second);
+            printTableRule(keyWidth, valueWidth);
+        }
     };
 
-    printSection("COMMON", commonEntries);
-    printSection("SGSN", sgsnEntries);
-    printSection("MME", mmeEntries);
+    printSectionWithSub("COMMON", commonEntries);
+    printSectionWithSub("SGSN", sgsnEntries);
+    printSectionWithSub("MME", mmeEntries);
 }
 
 static InterfaceStatusEntry makeInterfaceStatusEntry(const InterfaceOverviewRow& row) {
@@ -2348,10 +2366,48 @@ static std::vector<std::string> completionCandidates(
     return filtered;
 }
 
+// Provide descriptions for completion candidates (heuristic)
+static std::string describeCandidate(const std::string& cand, CliMode mode, const std::string& currentLine) {
+    if (cand.empty()) return "";
+    if (cand == "series") return "IMSI series (prefix MSIN)";
+    if (cand == "range") return "IMSI numeric range (start end)";
+    if (cand == "plmn") return "PLMN (MCC MNC)";
+    if (cand == "interface" || cand == "int") return "Enter interface configuration";
+    // numeric suggestions
+    bool digits = true;
+    for (char c : cand) if (!std::isdigit(static_cast<unsigned char>(c))) { digits = false; break; }
+    if (digits) {
+        if (cand.size() == 3) return "MCC (country code)";
+        if (cand.size() == 2 || cand.size() == 3) return "MNC (operator code)";
+    }
+    // interface names
+    for (const auto &f : g_ifaces) {
+        if (f.name == cand) return std::string("Interface: ") + f.name;
+    }
+    // fallback
+    return "";
+}
+
+// Return candidates with short descriptions
+static std::vector<std::pair<std::string,std::string>> completionCandidatesWithDesc(
+    CliMode mode,
+    const std::string& currentLine,
+    const std::string& selectedInterface
+) {
+    auto list = completionCandidates(mode, currentLine, selectedInterface);
+    std::vector<std::pair<std::string,std::string>> out;
+    out.reserve(list.size());
+    for (const auto &c : list) {
+        out.emplace_back(c, describeCandidate(c, mode, currentLine));
+    }
+    return out;
+}
+
 #ifdef VEPC_USE_READLINE
 static CliMode g_readlineMode = CliMode::Exec;
 static std::string g_readlineSelectedInterface;
 static std::vector<std::string> g_readlineMatches;
+static std::vector<std::string> g_readlineDescriptions;
 
 static char* vepcReadlineGenerator(const char* text, int state) {
     static size_t index = 0;
@@ -2376,7 +2432,12 @@ static char* vepcReadlineGenerator(const char* text, int state) {
 static char** vepcReadlineCompletion(const char* text, int start, int end) {
     (void)start;
     (void)end;
-    g_readlineMatches = completionCandidates(g_readlineMode, rl_line_buffer ? rl_line_buffer : "", g_readlineSelectedInterface);
+    g_readlineMatches.clear();
+    g_readlineDescriptions.clear();
+    for (const auto &p : completionCandidatesWithDesc(g_readlineMode, rl_line_buffer ? rl_line_buffer : "", g_readlineSelectedInterface)) {
+        g_readlineMatches.push_back(p.first);
+        g_readlineDescriptions.push_back(p.second);
+    }
     if (g_readlineMatches.empty()) {
         return nullptr;
     }
@@ -2464,7 +2525,7 @@ static bool readInteractiveLineLinux(
         }
 
         if (ch == '\t') {
-            const std::vector<std::string> matches = completionCandidates(mode, outLine, selectedInterface);
+            const auto matches = completionCandidatesWithDesc(mode, outLine, selectedInterface);
             if (matches.empty()) {
                 continue;
             }
@@ -2472,17 +2533,19 @@ static bool readInteractiveLineLinux(
             std::vector<std::string> tokens = splitTokens(outLine);
             const bool endsWithSpace = !outLine.empty() && std::isspace(static_cast<unsigned char>(outLine.back()));
             if (matches.size() == 1) {
+                const std::string m = matches[0].first;
                 if (endsWithSpace) {
-                    outLine += matches[0] + " ";
+                    outLine += m + " ";
                 } else if (!tokens.empty()) {
                     const std::string prefix = tokens.back();
-                    outLine += matches[0].substr(prefix.size()) + " ";
+                    outLine += m.substr(prefix.size()) + " ";
                 }
                 redrawInteractiveLine(prompt, outLine);
             } else {
                 std::cout << "\n";
-                for (const auto& m : matches) {
-                    std::cout << m << "  ";
+                for (const auto& p : matches) {
+                    if (!p.second.empty()) std::cout << p.first << " — " << p.second << "\n";
+                    else std::cout << p.first << "\n";
                 }
                 std::cout << "\n";
                 redrawInteractiveLine(prompt, outLine);

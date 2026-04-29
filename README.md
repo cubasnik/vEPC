@@ -398,6 +398,28 @@ ansible-playbook -i ansible/inventory ansible/vepc-deploy.yml --check
 - [x] Cisco-style CLI interface
 - [x] Docker containerization
 - [x] Ansible deployment automation
+
+
+## 🌐 Web UI (experimental)
+
+An optional web UI skeleton lives in the `web/` folder. It runs as a separate container `vepc-web` (see `docker-compose.yml`). The web service serves a React SPA and provides a small Express adapter exposing basic API endpoints.
+
+Quick run (from repo root):
+
+```bash
+docker-compose up --build vepc-web
+```
+
+During development you can run the frontend dev server with Vite:
+
+```bash
+cd web
+npm install
+npm run dev
+```
+
+Place your EricssonSoft logo into `web/public/` (replace `logo-placeholder.svg`) to brand the UI.
+
 - [x] Linux VLAN interface management
 - [ ] GTP-U user plane data forwarding
 - [ ] Complete protocol flow execution
