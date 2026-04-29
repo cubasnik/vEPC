@@ -37,21 +37,56 @@ function requireAuth(req, res, next) {
 }
 
 function execCliCommand(cmd, timeoutMs = 5000) {
+  const retryDelay = 200; // ms between retries when socket missing
   return new Promise((resolve, reject) => {
-    const client = net.createConnection({ path: CLI_SOCKET }, () => {
-      client.write(cmd);
-    });
-    let respBuf = '';
-    client.on('data', (chunk) => { respBuf += chunk.toString(); });
-    client.on('end', () => { resolve(respBuf); });
-    client.on('error', (err) => { reject(err); });
-    // safety timeout
-    const to = setTimeout(() => {
-      try { client.end(); } catch(e) {}
-      reject(new Error('cli timeout'));
-    }, timeoutMs);
-    client.on('end', () => clearTimeout(to));
-    client.on('error', () => clearTimeout(to));
+    const start = Date.now();
+    let finished = false;
+
+    function tryOnce() {
+      if (finished) return;
+      const elapsed = Date.now() - start;
+      if (elapsed >= timeoutMs) {
+        finished = true;
+        return reject(new Error('cli timeout'));
+      }
+
+      const client = net.createConnection({ path: CLI_SOCKET });
+      let respBuf = '';
+      let to = setTimeout(() => {
+        if (finished) return;
+        finished = true;
+        try { client.end(); } catch (e) {}
+        reject(new Error('cli timeout'));
+      }, Math.max(1000, timeoutMs - elapsed));
+
+      client.on('connect', () => {
+        try { client.write(cmd); } catch (e) {}
+      });
+
+      client.on('data', (chunk) => { respBuf += chunk.toString(); });
+      client.on('end', () => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(to);
+        resolve(respBuf);
+      });
+
+      client.on('error', (err) => {
+        clearTimeout(to);
+        if (finished) return;
+        // Retry for common transient socket errors (service not yet started)
+        if (err && (err.code === 'ENOENT' || err.code === 'ECONNREFUSED' || err.code === 'ECONNRESET')) {
+          try { client.end(); } catch (e) {}
+          // small delay then retry
+          setTimeout(() => { tryOnce(); }, retryDelay);
+          return;
+        }
+        finished = true;
+        reject(err);
+      });
+    }
+
+    tryOnce();
   });
 }
 
