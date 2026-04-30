@@ -29,7 +29,7 @@ services:
       CONFIG_PATH: /etc/vepc
       LOG_PATH: {{ log_path }}
       VEPC_TRAFFIC_PORTS: '{{ traffic_linux_ports | join(",") }}'
-      - VEPC_CLI_SOCKET=/tmp/vepc.sock
+      VEPC_CLI_SOCKET: /tmp/vepc.sock
     
     stdin_open: true
     tty: true
