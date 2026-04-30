@@ -64,8 +64,8 @@ services:
     ports:
       - "3000:3000"
     volumes:
-      # bind host vepc unix socket into web container for CLI IPC
-      - /tmp/vepc.sock:/tmp/vepc.sock:ro
+      # mount host /tmp so web can see the socket file created by vepc
+      - /tmp:/tmp:ro
     restart: unless-stopped
     logging:
       driver: "json-file"
