@@ -359,7 +359,7 @@
       block:
         - name: Ensure Docker 'bridge' network exists, restart docker if missing
           shell: |
-            if ! docker network ls --format '{{"{{.Name}}"}}' | grep -q '^bridge$'; then
+            if ! docker network inspect bridge >/dev/null 2>&1; then
               systemctl restart docker || service docker restart || true
               sleep 3
             fi
