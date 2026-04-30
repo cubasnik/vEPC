@@ -356,21 +356,45 @@
         mode: '0644'
 
     - name: Build Docker image from Dockerfile
-      shell: |
-        cd {{ vepc_repo_path }}
-        # Ensure web image rebuilt to pick up any frontend changes
-        docker compose build {% if vepc_force_rebuild | bool %}--no-cache {% endif %}--pull vepc vepc-web || true
-      become: yes
-      register: docker_build
-      changed_when: true
+      block:
+        - name: Ensure Docker 'bridge' network exists, restart docker if missing
+          shell: |
+            if ! docker network ls --format '{{"{{.Name}}"}}' | grep -q '^bridge$'; then
+              systemctl restart docker || service docker restart || true
+              sleep 3
+            fi
+          register: docker_net_check
+          changed_when: false
+
+        - name: Build web image (use host network for npm install to avoid bridge issues)
+          shell: |
+            cd {{ vepc_repo_path }}
+            DOCKER_BUILDKIT=0 docker build --network=host -f {{ vepc_repo_path }}/web/Dockerfile -t vepc-vepc-web:latest {{ vepc_repo_path }}/web
+          register: web_build
+          become: yes
+          changed_when: "'Successfully' in web_build.stdout or web_build.rc == 0"
+
+        - name: Build vepc core image
+          shell: |
+            cd {{ vepc_repo_path }}
+            docker build -f {{ vepc_repo_path }}/Dockerfile -t vepc-vepc:latest {{ vepc_repo_path }}
+          register: core_build
+          become: yes
+          changed_when: "'Successfully' in core_build.stdout or core_build.rc == 0"
+      rescue:
+        - name: Fallback: attempt docker compose build (legacy fallback)
+          shell: |
+            cd {{ vepc_repo_path }}
+            docker compose build {% if vepc_force_rebuild | bool %}--no-cache {% endif %}--pull vepc vepc-web || true
+          become: yes
+          register: docker_build
+          changed_when: true
       notify: restart vepc container
+
     - name: Recreate vepc-web service to apply new build
       shell: |
-        cd {{ vepc_repo_path }}
-        docker compose up -d --no-deps --force-recreate vepc-web
+        docker compose --project-directory {{ vepc_repo_path }} -f {{ vepc_repo_path }}/docker-compose.yml up -d --no-deps --force-recreate vepc-web
       become: yes
-      args:
-        chdir: "{{ vepc_repo_path }}"
       register: vepc_web_up
       changed_when: "'Recreated' in vepc_web_up.stdout or 'Creating' in vepc_web_up.stdout or 'Starting' in vepc_web_up.stdout"
 
