@@ -36,46 +36,36 @@ function requireAuth(req, res, next) {
   next();
 }
 
-function execCliCommand(cmd, timeoutMs = 5000) {
+function execCliCommand(cmd, timeoutMs = 15000) {
   const retryDelay = 200; // ms between retries when socket missing
-    return new Promise((resolve, reject) => {
-      const start = Date.now();
-      let finished = false;
-      let attempt = 0;
-      const minDelay = 100; // ms
-      const maxDelay = 2000; // ms
-      const timeoutMs = 15000; // Increase overall timeout to 15s
+  return new Promise((resolve, reject) => {
+    const start = Date.now();
+    let finished = false;
 
-      function tryOnce() {
-        if (finished) return;
-        const elapsed = Date.now() - start;
-        if (elapsed >= timeoutMs) {
-          finished = true;
-          return reject(new Error('cli timeout'));
-        }
-
-        attempt += 1;
-        const client = net.createConnection({ path: CLI_SOCKET });
-        let respBuf = '';
-
+    function attempt() {
+      if (finished) return;
+      const elapsed = Date.now() - start;
+      if (elapsed >= timeoutMs) {
         finished = true;
         return reject(new Error('cli timeout'));
       }
 
       const client = net.createConnection({ path: CLI_SOCKET });
       let respBuf = '';
-      let to = setTimeout(() => {
+      const remaining = Math.max(1000, timeoutMs - (Date.now() - start));
+      const to = setTimeout(() => {
         if (finished) return;
         finished = true;
         try { client.end(); } catch (e) {}
         reject(new Error('cli timeout'));
-      }, Math.max(1000, timeoutMs - elapsed));
+      }, remaining);
 
       client.on('connect', () => {
         try { client.write(cmd); } catch (e) {}
       });
 
       client.on('data', (chunk) => { respBuf += chunk.toString(); });
+
       client.on('end', () => {
         if (finished) return;
         finished = true;
@@ -86,11 +76,10 @@ function execCliCommand(cmd, timeoutMs = 5000) {
       client.on('error', (err) => {
         clearTimeout(to);
         if (finished) return;
-        // Retry for common transient socket errors (service not yet started)
+        try { client.end(); } catch (e) {}
         if (err && (err.code === 'ENOENT' || err.code === 'ECONNREFUSED' || err.code === 'ECONNRESET')) {
-          try { client.end(); } catch (e) {}
-          // small delay then retry
-          setTimeout(() => { tryOnce(); }, retryDelay);
+          // transient, retry after short delay
+          setTimeout(attempt, retryDelay);
           return;
         }
         finished = true;
@@ -98,7 +87,7 @@ function execCliCommand(cmd, timeoutMs = 5000) {
       });
     }
 
-    tryOnce();
+    attempt();
   });
 }
 
