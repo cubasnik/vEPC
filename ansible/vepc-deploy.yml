@@ -366,29 +366,30 @@
           register: docker_net_check
           changed_when: false
 
-        - name: Build web image (use host network for npm install to avoid bridge issues)
+        - name: Try build web image (use host network for npm install to avoid bridge issues)
           shell: |
             cd {{ vepc_repo_path }}
             DOCKER_BUILDKIT=0 docker build --network=host -f {{ vepc_repo_path }}/web/Dockerfile -t vepc-vepc-web:latest {{ vepc_repo_path }}/web
           register: web_build
           become: yes
-          changed_when: "'Successfully' in web_build.stdout or web_build.rc == 0"
+          ignore_errors: yes
 
-        - name: Build vepc core image
+        - name: Try build vepc core image
           shell: |
             cd {{ vepc_repo_path }}
             docker build -f {{ vepc_repo_path }}/Dockerfile -t vepc-vepc:latest {{ vepc_repo_path }}
           register: core_build
           become: yes
-          changed_when: "'Successfully' in core_build.stdout or core_build.rc == 0"
-      rescue:
-        - name: Fallback: attempt docker compose build (legacy fallback)
+          ignore_errors: yes
+
+        - name: Fallback: attempt docker compose build (legacy fallback) if builds failed
           shell: |
             cd {{ vepc_repo_path }}
             docker compose build {% if vepc_force_rebuild | bool %}--no-cache {% endif %}--pull vepc vepc-web || true
           become: yes
-          register: docker_build
-          changed_when: true
+          register: docker_build_fallback
+          when: web_build is failed or core_build is failed
+      endblock: true
       notify: restart vepc container
 
     - name: Recreate vepc-web service to apply new build
