@@ -32,6 +32,12 @@
     s1ap_port: 36412
     diameter_port: 3868
     cli_port: 5555
+    # Path to CLI unix socket created by vEPC (used for readiness checks)
+    cli_socket_path: "/tmp/vepc.sock"
+    # Mount mode for host /tmp inside containers (rw or ro). Use 'rw' for reliability.
+    tmp_mount_mode: "rw"
+    # Detected docker compose command (populated in pre_tasks)
+    docker_compose_cmd: "docker compose"
     ssh_cli_enabled: true
     ssh_cli_port: 2205
     # List of CLI users to create. Passwords are stored in plaintext here and hashed on deployment.
@@ -320,7 +326,8 @@
         update: true
         force: true
       become: true
-      become_user: "{{ vepc_user }}"
+      # Run git as root to avoid permission errors on /opt mount points.
+      # Later we ensure correct ownership with a chown task.
     - name: Ensure repository matches origin/{{ vepc_repo_branch }} (force)
       shell: |
         git fetch --all --prune
@@ -329,7 +336,7 @@
       args:
         chdir: "{{ vepc_repo_path }}"
       become: true
-      become_user: "{{ vepc_user }}"
+      # Run as root to ensure operations succeed even if permissions are strict.
     - name: Ensure scripts directory exists after repository setup
       file:
         path: "{{ vepc_repo_path }}/scripts"
@@ -337,6 +344,15 @@
         owner: "{{ vepc_user }}"
         group: "{{ vepc_group }}"
         mode: '0755'
+
+    - name: Ensure repository ownership is correct
+      file:
+        path: "{{ vepc_repo_path }}"
+        state: directory
+        recurse: yes
+        owner: "{{ vepc_user }}"
+        group: "{{ vepc_group }}"
+      become: true
 
     # ==================== Docker Build ====================
     - name: Render deployment Dockerfile to target repository
@@ -357,6 +373,14 @@
 
     - name: Build Docker image from Dockerfile
       block:
+        - name: Prune Docker build cache to avoid corrupted BuildKit snapshots
+          shell: |
+            # Try buildx prune (if available) then fallback to classic builder prune
+            docker buildx prune --all --force || docker builder prune --force || true
+          become: yes
+          changed_when: false
+          ignore_errors: yes
+
         - name: Ensure Docker 'bridge' network exists, restart docker if missing
           shell: |
             if ! docker network inspect bridge >/dev/null 2>&1; then
@@ -372,30 +396,54 @@
             DOCKER_BUILDKIT=0 docker build --network=host -f {{ vepc_repo_path }}/web/Dockerfile -t vepc-vepc-web:latest {{ vepc_repo_path }}/web
           register: web_build
           become: yes
+          retries: 3
+          delay: 10
+          until: web_build.rc == 0
+
+        - name: Reset buildx builders (if present) to avoid stale snapshots
+          shell: |
+            if docker buildx version >/dev/null 2>&1; then
+              # remove all existing builders (ignore errors)
+              docker buildx ls --format '{{"{{.Name}}"}}' 2>/dev/null | xargs -r -n1 docker buildx rm || true
+              # create a fresh builder and select it
+              docker buildx create --use --name vepc-builder || true
+            fi
+          become: yes
+          changed_when: false
           ignore_errors: yes
 
-        - name: Try build vepc core image
+        - name: Try build vepc core image (disable BuildKit, optional no-cache, use host network)
           shell: |
             cd {{ vepc_repo_path }}
-            docker build -f {{ vepc_repo_path }}/Dockerfile -t vepc-vepc:latest {{ vepc_repo_path }}
+            export DOCKER_BUILDKIT=0
+            docker build --network=host {{ '--no-cache' if vepc_force_rebuild | default(false) | bool else '' }} -f {{ vepc_repo_path }}/Dockerfile -t vepc-vepc:latest {{ vepc_repo_path }}
           register: core_build
           become: yes
-          ignore_errors: yes
+          retries: 3
+          delay: 10
+          until: core_build.rc == 0
 
         - name: Fallback attempt docker-compose build (legacy fallback)
           shell: |
             cd {{ vepc_repo_path }}
-            docker compose build {% if vepc_force_rebuild | bool %}--no-cache {% endif %}--pull vepc vepc-web || true
+            {{ docker_compose_cmd }} build {% if vepc_force_rebuild | bool %}--no-cache {% endif %}--pull vepc vepc-web
           become: yes
           register: docker_build_fallback
+          failed_when: docker_build_fallback.rc != 0
           when: "(web_build is defined and web_build.rc != 0) or (core_build is defined and core_build.rc != 0)"
+
+        - name: Fail if both direct docker build and fallback failed
+          fail:
+            msg: "Both direct docker build and fallback docker compose build failed. See previous logs."
+          when: "((web_build is defined and web_build.rc != 0) and (docker_build_fallback is defined and docker_build_fallback.rc != 0)) or ((core_build is defined and core_build.rc != 0) and (docker_build_fallback is defined and docker_build_fallback.rc != 0))"
       notify: restart vepc container
 
     - name: Recreate vepc-web service to apply new build
       shell: |
-        docker compose --project-directory {{ vepc_repo_path }} -f {{ vepc_repo_path }}/docker-compose.yml up -d --no-deps --force-recreate vepc-web
+        {{ docker_compose_cmd }} --project-directory {{ vepc_repo_path }} -f {{ vepc_repo_path }}/docker-compose.yml up -d --no-deps --force-recreate vepc-web
       become: yes
       register: vepc_web_up
+      failed_when: vepc_web_up.rc != 0
       changed_when: "'Recreated' in vepc_web_up.stdout or 'Creating' in vepc_web_up.stdout or 'Starting' in vepc_web_up.stdout"
 
     # ==================== Configuration ====================
@@ -451,11 +499,12 @@
           docker rm -f {{ vepc_old_container_name }} || true
         fi
 
+
     # ==================== Container Deployment ====================
     - name: Start vEPC container with docker compose
       shell: |
         cd {{ vepc_repo_path }}
-        docker compose up -d --force-recreate --remove-orphans
+        {{ docker_compose_cmd }} up -d --force-recreate --remove-orphans
       become: yes
       args:
         chdir: "{{ vepc_repo_path }}"
@@ -467,11 +516,11 @@
 
     - name: Wait for vEPC service to be ready
       wait_for:
-        host: "localhost"
-        port: "{{ cli_port }}"
-        delay: 5
+        path: "{{ cli_socket_path }}"
+        delay: 2
         timeout: 60
-      ignore_errors: yes
+      register: wait_sock
+      failed_when: wait_sock is failed
 
     # ==================== Health Check ====================
     - name: Verify vEPC container is running
@@ -664,6 +713,7 @@
         timeout: 30
       when: ssh_cli_enabled | bool
 
+
     # ==================== Network Configuration ====================
     - name: Enable IP forwarding
       sysctl:
@@ -740,7 +790,7 @@
     - name: restart vepc container
       shell: |
         cd {{ vepc_repo_path }}
-        docker compose restart
-      become: no
-      become_user: "{{ vepc_user }}"
+        {{ docker_compose_cmd }} restart
+      become: yes
+      become_user: root
       ignore_errors: yes

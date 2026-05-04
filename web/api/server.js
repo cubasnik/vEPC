@@ -151,8 +151,11 @@ function parseImsiGroups(runningConfigText) {
 function parseInterfaces(text) {
   const lines = text.split(/\r?\n/)
   const out = []
-  for (const raw of lines) {
+  for (let i = 0; i < lines.length; i++) {
+    let raw = lines[i]
+    if (!raw) continue
     const line = raw.replace(/\t/g, ' ')
+    // main summary line is expected to have fixed-width columns
     if (line.length < 86) continue
     const name = line.substring(0, 12).trim()
     const proto = line.substring(12, 24).trim()
@@ -161,7 +164,29 @@ function parseInterfaces(text) {
     const oper = line.substring(58, 70).trim()
     const implementation = line.substring(70, 86).trim()
     const peer = line.substring(86).trim()
-    if (name) out.push({ name, proto, address, admin, oper, implementation, peer })
+
+    const iface = { name, proto, address, admin, oper, implementation, peer }
+
+    // collect following diagnostic lines (they often start with 'diag:' or are indented)
+    let diagLines = []
+    let j = i + 1
+    while (j < lines.length) {
+      const nxt = lines[j]
+      if (!nxt) { j++; continue }
+      const t = nxt.trim()
+      // treat as diagnostic/detail line if it starts with 'diag:' or begins with whitespace (continuation)
+      if (/^diag[:\s]/i.test(t) || /^\s+/.test(nxt)) {
+        diagLines.push(nxt.trim())
+        j++
+        continue
+      }
+      break
+    }
+    if (diagLines.length) iface.diagnostic = diagLines.join(' ').replace(/\s+/g, ' ')
+
+    if (name) out.push(iface)
+    // advance index to skip consumed diagnostic lines
+    i = j - 1
   }
   return out
 }
@@ -225,6 +250,47 @@ app.delete('/api/imsi/:name', requireAuth, async (req, res) => {
   // create commands to clear each field (set to empty)
   const cmds = fields.map(f => `set imsi-group.${name}.${f} `);
   // send clearing commands (set to empty)
+  try {
+    const out = await execCliCommand(cmds.join('\n') + '\n');
+    res.json({ ok: true, out });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: e.message });
+  }
+});
+
+// PUT /api/imsi/:name - update IMSI group fields (partial update)
+app.put('/api/imsi/:name', requireAuth, async (req, res) => {
+  const name = String(req.params.name || '').trim();
+  if (!name) return res.status(400).json({ ok: false, reason: 'missing name' });
+  const body = req.body || {};
+  const cmds = [];
+  if (body.plmns) cmds.push(`set imsi-group.${name}.plmn ${String(body.plmns)}`);
+  if (body.kind) cmds.push(`set imsi-group.${name}.type ${String(body.kind)}`);
+  if (body.apnProfile) cmds.push(`set imsi-group.${name}.apn-profile ${String(body.apnProfile)}`);
+  if (body.kind === 'range' || body.start || body.end) {
+    if (body.start) {
+      if (!/^\d+$/.test(String(body.start))) return res.status(400).json({ ok: false, reason: 'invalid start' });
+      cmds.push(`set imsi-group.${name}.range-start ${String(body.start)}`);
+    }
+    if (body.end) {
+      if (!/^\d+$/.test(String(body.end))) return res.status(400).json({ ok: false, reason: 'invalid end' });
+      cmds.push(`set imsi-group.${name}.range-end ${String(body.end)}`);
+    }
+  }
+  if (body.kind === 'series' || body.series) {
+    if (body.series) {
+      if (!/^[0-9]+$/.test(String(body.series))) return res.status(400).json({ ok: false, reason: 'invalid series' });
+      cmds.push(`set imsi-group.${name}.series ${String(body.series)}`);
+    }
+    if (body.count) {
+      const c = parseInt(body.count, 10);
+      if (isNaN(c)) return res.status(400).json({ ok: false, reason: 'invalid count' });
+      cmds.push(`set imsi-group.${name}.count ${c}`);
+    }
+  }
+
+  if (cmds.length === 0) return res.status(400).json({ ok: false, reason: 'no fields to update' });
+
   try {
     const out = await execCliCommand(cmds.join('\n') + '\n');
     res.json({ ok: true, out });

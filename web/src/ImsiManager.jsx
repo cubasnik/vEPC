@@ -29,6 +29,19 @@ export default function ImsiManager() {
   async function createGroup(values) {
     try {
       const body = Object.assign({}, values)
+      // if editing existing group, use PUT
+      if (body._editingName) {
+        const name = body._editingName
+        delete body._editingName
+        const res = await ApiFetch('/api/imsi/' + encodeURIComponent(name), { method: 'PUT', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } }, token)
+        const j = await res.json()
+        if (!j.ok) throw new Error(j.reason || 'failed')
+        message.success('IMSI group updated')
+        setModalVisible(false)
+        form.resetFields()
+        load()
+        return
+      }
       const res = await ApiFetch('/api/imsi', { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } }, token)
       const j = await res.json()
       if (!j.ok) throw new Error(j.reason || 'failed')
@@ -62,8 +75,20 @@ export default function ImsiManager() {
     { title: 'PLMN', dataIndex: 'plmn', key: 'plmn' },
     { title: 'Details', key: 'details', render: (_, r) => r.type === 'range' ? `${r.rangeStart}-${r.rangeEnd}` : r.series },
     { title: 'APN', dataIndex: 'apnProfile', key: 'apnProfile' },
-    { title: 'Actions', key: 'actions', render: (_, r) => (<Space><Button danger size="small" onClick={()=>confirmDelete(r.name)}>Delete</Button></Space>) }
+    { title: 'Actions', key: 'actions', render: (_, r) => (<Space><Button size="small" onClick={()=>openEdit(r)}>Edit</Button><Button danger size="small" onClick={()=>confirmDelete(r.name)}>Delete</Button></Space>) }
   ]
+
+  function openEdit(r) {
+    // prefill form with group data and mark editing name
+    const values = Object.assign({}, r)
+    // normalize fields to expected form names
+    if (values.type === 'series') { values.kind = 'series'; values.series = values.series }
+    else if (values.type === 'range') { values.kind = 'range'; values.start = values.rangeStart; values.end = values.rangeEnd }
+    values.plmns = values.plmn
+    values._editingName = values.name
+    form.setFieldsValue(values)
+    setModalVisible(true)
+  }
 
   return (
     <Card title="IMSI Groups" extra={<Space><Input placeholder="API token (optional)" value={token} onChange={e=>setToken(e.target.value)} style={{width:260}} /><Button onClick={load}>Reload</Button><Button type="primary" onClick={()=>setModalVisible(true)}>Create</Button></Space>}>

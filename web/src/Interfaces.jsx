@@ -4,6 +4,7 @@ import { Card, Table, Button, Space, message, Spin } from 'antd'
 export default function Interfaces(){
   const [ifaces, setIfaces] = React.useState([])
   const [loading, setLoading] = React.useState(false)
+  const [expandedRowKeys, setExpandedRowKeys] = React.useState([])
 
   async function load(){
     setLoading(true)
@@ -11,7 +12,10 @@ export default function Interfaces(){
       const res = await fetch('/api/interfaces')
       const j = await res.json()
       if (!j.ok) throw new Error(j.reason || 'failed')
-      setIfaces(j.interfaces || [])
+      const list = j.interfaces || []
+      setIfaces(list)
+      // expand rows that have diagnostic text by default
+      setExpandedRowKeys(list.filter(i => i.diagnostic).map(i => i.name))
     } catch (e) { message.error(e.message) }
     finally { setLoading(false) }
   }
@@ -31,7 +35,19 @@ export default function Interfaces(){
   return (
     <Card title="Interfaces" extra={<Space><Button onClick={load}>Refresh</Button></Space>} style={{marginTop:12}}>
       <Spin spinning={loading}>
-        <Table dataSource={ifaces} columns={columns} rowKey={r=>r.name} pagination={false} />
+        <Table
+          dataSource={ifaces}
+          columns={columns}
+          rowKey={r=>r.name}
+          pagination={false}
+          expandable={{
+            expandedRowRender: record => <div style={{whiteSpace:'pre-wrap', wordBreak:'break-word'}}>{record.diagnostic || ''}</div>,
+            rowExpandable: record => !!record.diagnostic,
+            expandRowByClick: true
+          }}
+          expandedRowKeys={expandedRowKeys}
+          onExpandedRowsChange={keys => setExpandedRowKeys(keys)}
+        />
       </Spin>
     </Card>
   )
