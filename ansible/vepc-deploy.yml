@@ -382,7 +382,7 @@
           become: yes
           ignore_errors: yes
 
-        - name: Fallback: attempt docker compose build (legacy fallback) if builds failed
+        - name: Fallback attempt: docker compose build (legacy fallback) if builds failed
           shell: |
             cd {{ vepc_repo_path }}
             docker compose build {% if vepc_force_rebuild | bool %}--no-cache {% endif %}--pull vepc vepc-web || true
