@@ -387,10 +387,9 @@
             cd {{ vepc_repo_path }}
             docker compose build {% if vepc_force_rebuild | bool %}--no-cache {% endif %}--pull vepc vepc-web || true
           become: yes
-          register: docker_build_fallback
-          when: web_build is failed or core_build is failed
-      endblock: true
-      notify: restart vepc container
+            register: docker_build_fallback
+            when: "(web_build is defined and web_build.rc != 0) or (core_build is defined and core_build.rc != 0)"
+          notify: restart vepc container
 
     - name: Recreate vepc-web service to apply new build
       shell: |
