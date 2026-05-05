@@ -165,6 +165,9 @@ function parseInterfaces(text) {
     const implementation = line.substring(70, 86).trim()
     const peer = line.substring(86).trim()
 
+    // skip visual separator or filler lines made of dashes
+    if (/^[-\s]+$/.test(name) || /^[-\s]+$/.test(proto) || /^[-\s]+$/.test(address)) continue
+
     const iface = { name, proto, address, admin, oper, implementation, peer }
 
     // collect following diagnostic lines (they often start with 'diag:' or are indented)
