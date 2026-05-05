@@ -431,9 +431,30 @@ function parseRuntime(text) {
 // GET /api/runtime - structured runtime/state
 app.get('/api/runtime', requireAuth, async (req, res) => {
   try {
-    const out = await execCliCommand('show state\n')
+    // Try a list of candidate commands to obtain runtime/state info
+    const candidates = ['show state', 'state', 'show', 'status']
+    let out = null
+    let used = null
+    for (const c of candidates) {
+      try {
+        out = await execCliCommand(c + '\n')
+        // if CLI replies with unknown command, continue to next
+        if (/Unknown command:/i.test(out) || /Available:/i.test(out)) {
+          out = null
+          continue
+        }
+        used = c
+        break
+      } catch (e) {
+        // try next candidate
+        out = null
+      }
+    }
+
+    if (!out) return res.status(500).json({ ok: false, reason: 'no supported runtime command available' })
+
     const parsed = parseRuntime(out)
-    res.json({ ok: true, raw: out, ...parsed })
+    res.json({ ok: true, cmd: used, raw: out, ...parsed })
   } catch (e) {
     res.status(500).json({ ok: false, reason: e.message })
   }
