@@ -11,6 +11,7 @@ export default function AdminPanel(){
   const [confirmVisible, setConfirmVisible] = React.useState(false)
   const [confirmCmd, setConfirmCmd] = React.useState('')
   const [usedCmd, setUsedCmd] = React.useState(null)
+  const [runtimeData, setRuntimeData] = React.useState(null)
 
   async function callApi(path, opts){
     setLoading(true)
@@ -18,8 +19,14 @@ export default function AdminPanel(){
       const res = await fetch(path, opts)
       const j = await res.json()
       if (!j.ok) throw new Error(j.reason || 'failed')
-      setOutput(j.out || j.config || JSON.stringify(j, null, 2))
-      if (j.cmd) setUsedCmd(j.cmd)
+      // runtime is structured; keep it separate
+      if (path === '/api/runtime') {
+        setRuntimeData(j)
+        if (j.cmd) setUsedCmd(j.cmd)
+      } else {
+        setOutput(j.out || j.config || JSON.stringify(j, null, 2))
+        if (j.cmd) setUsedCmd(j.cmd)
+      }
     } catch (e){ message.error(e.message); setOutput(e.message) }
     finally{ setLoading(false) }
   }
@@ -58,10 +65,30 @@ export default function AdminPanel(){
           <span>Состояние {usedCmd ? <Badge style={{marginLeft:8}} count={usedCmd} /> : null}</span>
         } key="runtime">
           <Space style={{marginBottom:8}}>
-            <Button onClick={()=>{ setOutput(''); setUsedCmd(null); callApi('/api/runtime') }}>Показать состояние</Button>
+            <Button onClick={()=>{ setOutput(''); setUsedCmd(null); setRuntimeData(null); callApi('/api/runtime') }}>Показать состояние</Button>
           </Space>
-          <div style={{marginTop:12, minHeight:160}}>
-            <pre style={{whiteSpace:'pre-wrap', fontFamily:'monospace', fontSize:12}}>{output || 'Результат появится здесь'}</pre>
+          <div style={{marginTop:12}}>
+            {runtimeData ? (
+              <div>
+                <div style={{marginBottom:8}}>PDP контекстов: {runtimeData.pdpContexts ? runtimeData.pdpContexts.length : 0}</div>
+                <div style={{marginBottom:8}}>Телеметрия эндпоинтов:</div>
+                {runtimeData.endpointTelemetry && runtimeData.endpointTelemetry.length ? (
+                  <div>
+                    {runtimeData.endpointTelemetry.map((e, idx) => (
+                      <Card size="small" key={idx} style={{marginBottom:8}}>
+                        <div><b>{e.Name}</b> — {e.Protocol} @ {e.Address}</div>
+                        <div>Bind: {e['Effective Bind']}</div>
+                        <div>Active: {e.Active} Rx: {e['Rx Packets']} / {e['Rx Bytes']}</div>
+                      </Card>
+                    ))}
+                  </div>
+                ) : <div>Нет данных телеметрии</div>}
+
+                <div style={{marginTop:8}}>UE контекстов: {runtimeData.ueContexts ? runtimeData.ueContexts.length : 0}</div>
+              </div>
+            ) : (
+              <pre style={{whiteSpace:'pre-wrap', fontFamily:'monospace', fontSize:12}}>{output || 'Результат появится здесь'}</pre>
+            )}
           </div>
         </TabPane>
 
@@ -69,18 +96,19 @@ export default function AdminPanel(){
           <Space style={{marginBottom:8}}>
             <Button danger onClick={()=>askConfirm('restart')}>Перезапустить vEPC</Button>
             <Button danger onClick={()=>askConfirm('stop')}>Остановить vEPC</Button>
-            <Button onClick={()=>{
-              // show imsi groups in modal
-              callApi('/api/cli', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ cmd: 'show imsi-group' }) })
-              Modal.info({ title: 'Группы IMSI (live)', content: <pre style={{whiteSpace:'pre-wrap'}}>{output || 'Запрос отправлен'}</pre>, width:800 })
+            <Button onClick={async ()=>{
+              try {
+                const res = await fetch('/api/imsi')
+                const j = await res.json()
+                if (!j.ok) throw new Error(j.reason || 'failed')
+                Modal.info({ title: 'Группы IMSI (live)', content: <pre style={{whiteSpace:'pre-wrap'}}>{JSON.stringify(j.groups || [], null, 2)}</pre>, width:800 })
+              } catch(e) { message.error(e.message) }
             }}>Показать группы IMSI</Button>
           </Space>
         </TabPane>
       </Tabs>
 
-      <div style={{marginTop:12, minHeight:160}}>
-        <pre style={{whiteSpace:'pre-wrap', fontFamily:'monospace', fontSize:12}}>{output || 'Output will appear here'}</pre>
-      </div>
+      {/* Global output removed — results shown in relevant tabs */}
 
       <Modal title="Confirm command" open={confirmVisible} onOk={performConfirmed} onCancel={()=>setConfirmVisible(false)} okText="Execute" okButtonProps={{danger:true}}>
         <p>Execute command: <b>{confirmCmd}</b> ?</p>
