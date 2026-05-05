@@ -261,7 +261,14 @@ app.post('/api/imsi', requireAuth, async (req, res) => {
 
   try {
     const out = await execCliCommand(cmds.join('\n') + '\n');
-    res.json({ ok: true, out });
+    // try to fetch updated groups right after applying changes
+    try {
+      const fresh = await execCliCommand('show\n')
+      const parsed = parseImsiGroups(fresh)
+      return res.json({ ok: true, out, groups: parsed })
+    } catch (e) {
+      return res.json({ ok: true, out })
+    }
   } catch (e) {
     res.status(500).json({ ok: false, reason: e.message });
   }
@@ -277,7 +284,13 @@ app.delete('/api/imsi/:name', requireAuth, async (req, res) => {
   // send clearing commands (set to empty)
   try {
     const out = await execCliCommand(cmds.join('\n') + '\n');
-    res.json({ ok: true, out });
+    try {
+      const fresh = await execCliCommand('show\n')
+      const parsed = parseImsiGroups(fresh)
+      return res.json({ ok: true, out, groups: parsed })
+    } catch (e) {
+      return res.json({ ok: true, out })
+    }
   } catch (e) {
     res.status(500).json({ ok: false, reason: e.message });
   }
@@ -318,7 +331,13 @@ app.put('/api/imsi/:name', requireAuth, async (req, res) => {
 
   try {
     const out = await execCliCommand(cmds.join('\n') + '\n');
-    res.json({ ok: true, out });
+    try {
+      const fresh = await execCliCommand('show\n')
+      const parsed = parseImsiGroups(fresh)
+      return res.json({ ok: true, out, groups: parsed })
+    } catch (e) {
+      return res.json({ ok: true, out })
+    }
   } catch (e) {
     res.status(500).json({ ok: false, reason: e.message });
   }
