@@ -125,36 +125,70 @@ app.get('/api/show-config', requireAuth, async (req, res) => {
 
 // Parse imsi groups from running-config dump
 function parseImsiGroups(runningConfigText) {
+  // Support two running-config formats:
+  // 1) Block format:
+  //    imsi-group <name>
+  //      plmn <plmn>
+  //      series <prefix>
+  //      #exit
+  // 2) Key/value dotted format (table-style):
+  //    imsi-group.<name>.<field> | value
   const lines = runningConfigText.split(/\r?\n/);
-  const groups = [];
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i].trimRight();
-    const m = line.match(/^imsi-group\s+(\S+)$/);
+  const groupsMap = {}
+
+  // First pass: dotted key/value lines
+  for (let raw of lines) {
+    if (!raw) continue
+    // normalize pipes/tables: remove '|' and collapse spaces
+    const clean = raw.replace(/\|/g, ' ').trim()
+    // match dotted keys like imsi-group.NAME.FIELD value
+    const m = clean.match(/^imsi-group\.([^\.\s]+)\.([^\s]+)\s+(.*)$/i)
     if (m) {
-      const name = m[1];
-      const group = { name, plmn: '', type: '', rangeStart: '', rangeEnd: '', series: '', apnProfile: '' };
-      i++;
-      while (i < lines.length) {
-        const sub = lines[i].trim();
-        if (sub === '#exit') { i++; break; }
-        const pm = sub.match(/^plmn\s+(\S+)/);
-        if (pm) { group.plmn = pm[1]; i++; continue; }
-        const rm = sub.match(/^range\s+(\S+)\s+(\S+)/);
-        if (rm) { group.type = 'range'; group.rangeStart = rm[1]; group.rangeEnd = rm[2]; i++; continue; }
-        const sm = sub.match(/^series\s+(\S+)/);
-        if (sm) { group.type = 'series'; group.series = sm[1]; i++; continue; }
-        const am = sub.match(/^apn-profile\s+(\S+)/);
-        if (am) { group.apnProfile = am[1]; i++; continue; }
-        // unknown line
-        i++;
-      }
-      groups.push(group);
-      continue;
+      const name = m[1]
+      const field = m[2].toLowerCase()
+      const val = m[3].trim()
+      if (!groupsMap[name]) groupsMap[name] = { name, plmn: '', type: '', rangeStart: '', rangeEnd: '', series: '', apnProfile: '' }
+      if (field === 'plmn') groupsMap[name].plmn = val
+      else if (field === 'type') groupsMap[name].type = val
+      else if (field === 'range-start' || field === 'rangestart') groupsMap[name].rangeStart = val
+      else if (field === 'range-end' || field === 'rangeend') groupsMap[name].rangeEnd = val
+      else if (field === 'series') groupsMap[name].series = val
+      else if (field === 'apn-profile' || field === 'apnprofile') groupsMap[name].apnProfile = val
+      else if (field === 'count') groupsMap[name].count = val
     }
-    i++;
   }
-  return groups;
+
+  // Second pass: block-style entries (legacy)
+  let i = 0
+  while (i < lines.length) {
+    const line = lines[i].trimRight()
+    const m = line.match(/^imsi-group\s+(\S+)$/i)
+    if (m) {
+      const name = m[1]
+      const group = groupsMap[name] || { name, plmn: '', type: '', rangeStart: '', rangeEnd: '', series: '', apnProfile: '' }
+      i++
+      while (i < lines.length) {
+        const sub = lines[i].trim()
+        if (sub === '#exit') { i++; break }
+        const pm = sub.match(/^plmn\s+(\S+)/i)
+        if (pm) { group.plmn = pm[1]; i++; continue }
+        const rm = sub.match(/^range\s+(\S+)\s+(\S+)/i)
+        if (rm) { group.type = 'range'; group.rangeStart = rm[1]; group.rangeEnd = rm[2]; i++; continue }
+        const sm = sub.match(/^series\s+(\S+)/i)
+        if (sm) { group.type = 'series'; group.series = sm[1]; i++; continue }
+        const am = sub.match(/^apn-profile\s+(\S+)/i)
+        if (am) { group.apnProfile = am[1]; i++; continue }
+        i++
+      }
+      groupsMap[name] = group
+      continue
+    }
+    i++
+  }
+
+  // Convert map to array
+  const groups = Object.keys(groupsMap).map(k => groupsMap[k])
+  return groups
 }
 
 // Parse interface overview table produced by `show iface`
