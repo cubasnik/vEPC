@@ -6,6 +6,7 @@ import ImsiManager from './ImsiManager'
 import ShowConfig from './ShowConfig'
 import Interfaces from './Interfaces'
 import Runtime from './Runtime'
+import CliConsole from './CliConsole'
 
 const { Header, Content } = Layout
 const { Title } = Typography
@@ -38,6 +39,7 @@ export default function App() {
           </Col>
           <Col xs={24} lg={16}>
             <div>
+              <CliConsole />
               <ImsiManager />
               <ShowConfig />
               <Interfaces />

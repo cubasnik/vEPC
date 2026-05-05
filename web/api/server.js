@@ -106,8 +106,18 @@ app.post('/api/cli', requireAuth, async (req, res) => {
 
 app.get('/api/show-config', requireAuth, async (req, res) => {
   try {
-    const out = await execCliCommand('show running-config\n');
-    res.json({ ok: true, out });
+    const cfgPath = '/etc/vepc/vepc.config'
+    if (fs.existsSync(cfgPath)) {
+      const data = fs.readFileSync(cfgPath, 'utf8')
+      return res.json({ ok: true, out: data, config: data })
+    }
+    // fallback to CLI if config file isn't mounted
+    try {
+      const out = await execCliCommand('show running-config\n');
+      return res.json({ ok: true, out });
+    } catch (e) {
+      return res.status(500).json({ ok: false, reason: 'running-config not available: ' + e.message })
+    }
   } catch (e) {
     res.status(500).json({ ok: false, reason: e.message });
   }
