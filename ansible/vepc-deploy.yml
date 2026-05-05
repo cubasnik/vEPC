@@ -448,6 +448,8 @@
             exit $rc
           register: core_build
           become: yes
+          args:
+            executable: /bin/bash
           retries: 3
           delay: 10
           until: core_build.rc == 0
