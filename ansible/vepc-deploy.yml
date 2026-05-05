@@ -48,6 +48,12 @@
 
     # Set to true to force Docker image rebuild on every deploy (--no-cache)
     vepc_force_rebuild: true
+    # When true, run an aggressive buildx/builder prune before builds. Keep false to preserve cache.
+    vepc_prune_buildkit: false
+    # Base image to pre-pull to speed builds
+    vepc_base_image: "ubuntu:22.04"
+    # Previous image to use as cache-from when available
+    vepc_previous_image_cache: "docker.io/vepc-vepc:latest"
 
     # Docker configuration
     docker_registry: "docker.io"
@@ -373,13 +379,14 @@
 
     - name: Build Docker image from Dockerfile
       block:
-        - name: Prune Docker build cache to avoid corrupted BuildKit snapshots
+        - name: Prune Docker build cache to avoid corrupted BuildKit snapshots (optional)
           shell: |
-            # Try buildx prune (if available) then fallback to classic builder prune
+            # Run prune only when explicitly requested to avoid losing useful cache
             docker buildx prune --all --force || docker builder prune --force || true
           become: yes
           changed_when: false
           ignore_errors: yes
+          when: vepc_prune_buildkit | default(false) | bool
 
         - name: Ensure Docker 'bridge' network exists, restart docker if missing
           shell: |
@@ -388,6 +395,11 @@
               sleep 3
             fi
           register: docker_net_check
+          changed_when: false
+
+        - name: Pre-pull base image to speed builds
+          shell: docker pull {{ vepc_base_image }} || true
+          become: yes
           changed_when: false
 
         - name: Try build web image (use host network for npm install to avoid bridge issues)
@@ -412,11 +424,20 @@
           changed_when: false
           ignore_errors: yes
 
-        - name: Try build vepc core image (disable BuildKit, optional no-cache, use host network)
+        - name: Pull previous vepc image for cache reuse (optional)
+          shell: docker pull {{ vepc_previous_image_cache }} || true
+          become: yes
+          changed_when: false
+
+        - name: Try build vepc core image (disable BuildKit, optional no-cache, use host network, cache-from)
           shell: |
             cd {{ vepc_repo_path }}
             export DOCKER_BUILDKIT=0
-            docker build --network=host {{ '--no-cache' if vepc_force_rebuild | default(false) | bool else '' }} -f {{ vepc_repo_path }}/Dockerfile -t vepc-vepc:latest {{ vepc_repo_path }}
+            {% if vepc_force_rebuild | default(false) | bool %}
+            docker build --network=host --no-cache -f {{ vepc_repo_path }}/Dockerfile -t vepc-vepc:latest {{ vepc_repo_path }}
+            {% else %}
+            docker build --network=host --cache-from {{ vepc_previous_image_cache }} -f {{ vepc_repo_path }}/Dockerfile -t vepc-vepc:latest {{ vepc_repo_path }}
+            {% endif %}
           register: core_build
           become: yes
           retries: 3
