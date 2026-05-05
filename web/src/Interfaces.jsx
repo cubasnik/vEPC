@@ -44,7 +44,7 @@ export default function Interfaces({ filterPhysical = false }){
   ]
 
   return (
-    <Card title="Interfaces" extra={<Space><Button onClick={load}>Refresh</Button></Space>} style={{marginTop:12}}>
+    <Card title="Интерфейсы" extra={<Space><Button onClick={load}>Обновить</Button></Space>} style={{marginTop:12}}>
       <Spin spinning={loading}>
         <div style={{overflowX: 'hidden'}}>
           <Table

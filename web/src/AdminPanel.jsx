@@ -1,5 +1,5 @@
 import React from 'react'
-import { Tabs, Card, Button, Space, message, Modal } from 'antd'
+import { Tabs, Card, Button, Space, message, Modal, Badge } from 'antd'
 import ImsiManager from './ImsiManager'
 import Interfaces from './Interfaces'
 
@@ -10,6 +10,7 @@ export default function AdminPanel(){
   const [loading, setLoading] = React.useState(false)
   const [confirmVisible, setConfirmVisible] = React.useState(false)
   const [confirmCmd, setConfirmCmd] = React.useState('')
+  const [usedCmd, setUsedCmd] = React.useState(null)
 
   async function callApi(path, opts){
     setLoading(true)
@@ -18,6 +19,7 @@ export default function AdminPanel(){
       const j = await res.json()
       if (!j.ok) throw new Error(j.reason || 'failed')
       setOutput(j.out || j.config || JSON.stringify(j, null, 2))
+      if (j.cmd) setUsedCmd(j.cmd)
     } catch (e){ message.error(e.message); setOutput(e.message) }
     finally{ setLoading(false) }
   }
@@ -40,11 +42,11 @@ export default function AdminPanel(){
   return (
     <Card title="Admin" style={{marginTop:12}}>
       <Tabs defaultActiveKey="interfaces">
-        <TabPane tab="Interfaces" key="interfaces">
+        <TabPane tab="Интерфейсы" key="interfaces">
           <Interfaces />
         </TabPane>
 
-        <TabPane tab="Physical Ports" key="ports">
+        <TabPane tab="Физические порты" key="ports">
           <Interfaces filterPhysical />
         </TabPane>
 
@@ -52,17 +54,26 @@ export default function AdminPanel(){
           <ImsiManager />
         </TabPane>
 
-        <TabPane tab="Runtime" key="runtime">
+        <TabPane tab={
+          <span>Состояние {usedCmd ? <Badge style={{marginLeft:8}} count={usedCmd} /> : null}</span>
+        } key="runtime">
           <Space style={{marginBottom:8}}>
-            <Button onClick={()=>callApi('/api/runtime')}>Show Runtime</Button>
+            <Button onClick={()=>{ setOutput(''); setUsedCmd(null); callApi('/api/runtime') }}>Показать состояние</Button>
           </Space>
+          <div style={{marginTop:12, minHeight:160}}>
+            <pre style={{whiteSpace:'pre-wrap', fontFamily:'monospace', fontSize:12}}>{output || 'Результат появится здесь'}</pre>
+          </div>
         </TabPane>
 
-        <TabPane tab="Admin" key="admin">
+        <TabPane tab="Администрирование" key="admin">
           <Space style={{marginBottom:8}}>
-            <Button danger onClick={()=>askConfirm('restart')}>Restart vEPC</Button>
-            <Button danger onClick={()=>askConfirm('stop')}>Stop vEPC</Button>
-            <Button onClick={()=>callApi('/api/cli', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ cmd: 'show imsi-group' }) })}>Show IMSI Groups</Button>
+            <Button danger onClick={()=>askConfirm('restart')}>Перезапустить vEPC</Button>
+            <Button danger onClick={()=>askConfirm('stop')}>Остановить vEPC</Button>
+            <Button onClick={()=>{
+              // show imsi groups in modal
+              callApi('/api/cli', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ cmd: 'show imsi-group' }) })
+              Modal.info({ title: 'Группы IMSI (live)', content: <pre style={{whiteSpace:'pre-wrap'}}>{output || 'Запрос отправлен'}</pre>, width:800 })
+            }}>Показать группы IMSI</Button>
           </Space>
         </TabPane>
       </Tabs>

@@ -36,7 +36,16 @@ export default function ImsiManager() {
         const res = await ApiFetch('/api/imsi/' + encodeURIComponent(name), { method: 'PUT', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } }, token)
         const j = await res.json()
         if (!j.ok) throw new Error(j.reason || 'failed')
-        message.success('IMSI group updated')
+        message.success('Группа IMSI обновлена')
+        // update local state optimistically
+        setGroups(prev => (prev || []).map(g => g.name === name ? Object.assign({}, g, {
+          plmn: body.plmns || g.plmn,
+          type: body.kind || g.type,
+          apnProfile: body.apnProfile || g.apnProfile,
+          series: body.series || g.series,
+          rangeStart: body.start || g.rangeStart,
+          rangeEnd: body.end || g.rangeEnd,
+        }) : g))
         setModalVisible(false)
         form.resetFields()
         load()
@@ -45,24 +54,32 @@ export default function ImsiManager() {
       const res = await ApiFetch('/api/imsi', { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } }, token)
       const j = await res.json()
       if (!j.ok) throw new Error(j.reason || 'failed')
-      message.success('IMSI group created')
+      message.success('Группа IMSI создана')
+      // optimistic update: add created group into local table so user sees it immediately
+      const newGroup = { name: body.name, type: body.kind === 'series' ? 'series' : 'range', plmn: body.plmns }
+      if (body.kind === 'series') { newGroup.series = body.series; if (body.count) newGroup.count = body.count }
+      else { newGroup.rangeStart = body.start; newGroup.rangeEnd = body.end }
+      setGroups(prev => [newGroup].concat(prev || []))
       setModalVisible(false)
       form.resetFields()
+      // try to reload authoritative list in background
       load()
     } catch (e) { message.error(e.message) }
   }
 
   function confirmDelete(name) {
     Modal.confirm({
-      title: `Delete IMSI group ${name}?`,
-      okText: 'Delete',
+      title: `Удалить группу IMSI ${name}?`,
+      okText: 'Удалить',
       okType: 'danger',
       onOk: async () => {
         try {
           const res = await ApiFetch('/api/imsi/' + encodeURIComponent(name), { method: 'DELETE' }, token)
           const j = await res.json()
           if (!j.ok) throw new Error(j.reason || 'failed')
-          message.success('Deleted')
+          message.success('Удалено')
+          // remove locally
+          setGroups(prev => (prev || []).filter(g => g.name !== name))
           load()
         } catch (e) { message.error(e.message) }
       }
@@ -70,12 +87,12 @@ export default function ImsiManager() {
   }
 
   const columns = [
-    { title: 'Name', dataIndex: 'name', key: 'name' },
-    { title: 'Type', dataIndex: 'type', key: 'type' },
+    { title: 'Имя', dataIndex: 'name', key: 'name' },
+    { title: 'Тип', dataIndex: 'type', key: 'type' },
     { title: 'PLMN', dataIndex: 'plmn', key: 'plmn' },
-    { title: 'Details', key: 'details', render: (_, r) => r.type === 'range' ? `${r.rangeStart}-${r.rangeEnd}` : r.series },
+    { title: 'Детали', key: 'details', render: (_, r) => r.type === 'range' ? `${r.rangeStart}-${r.rangeEnd}` : r.series },
     { title: 'APN', dataIndex: 'apnProfile', key: 'apnProfile' },
-    { title: 'Actions', key: 'actions', render: (_, r) => (<Space><Button size="small" onClick={()=>openEdit(r)}>Edit</Button><Button danger size="small" onClick={()=>confirmDelete(r.name)}>Delete</Button></Space>) }
+    { title: 'Действия', key: 'actions', render: (_, r) => (<Space><Button size="small" onClick={()=>openEdit(r)}>Ред.</Button><Button danger size="small" onClick={()=>confirmDelete(r.name)}>Удал.</Button></Space>) }
   ]
 
   function openEdit(r) {
@@ -91,47 +108,46 @@ export default function ImsiManager() {
   }
 
   return (
-    <Card title="IMSI Groups" extra={<Space><Input placeholder="API token (optional)" value={token} onChange={e=>setToken(e.target.value)} style={{width:260}} /><Button onClick={load}>Reload</Button><Button type="primary" onClick={()=>setModalVisible(true)}>Create</Button></Space>}>
+    <Card title="Группы IMSI" extra={<Space><Input placeholder="API токен (необязательно)" value={token} onChange={e=>setToken(e.target.value)} style={{width:260}} /><Button onClick={load}>Перезагрузить</Button><Button type="primary" onClick={()=>setModalVisible(true)}>Создать</Button></Space>}>
       <Spin spinning={loading}>
         <Table rowKey="name" dataSource={groups} columns={columns} pagination={false} />
       </Spin>
 
-      <Modal title="Create IMSI Group" open={modalVisible} onCancel={()=>setModalVisible(false)} footer={null}>
+      <Modal title="Создать группу IMSI" open={modalVisible} onCancel={()=>setModalVisible(false)} footer={null}>
         <Form form={form} layout="vertical" onFinish={createGroup} initialValues={{ kind: 'series', count: 10 }}>
-          <Form.Item name="name" label="Name" rules={[{ required: true }]}>
+          <Form.Item name="name" label="Имя" rules={[{ required: true }]}> 
             <Input />
           </Form.Item>
-          <Form.Item name="kind" label="Kind" rules={[{ required: true }]}>
+          <Form.Item name="kind" label="Тип" rules={[{ required: true }]}> 
             <Select>
               <Option value="series">Series</Option>
               <Option value="range">Range</Option>
             </Select>
           </Form.Item>
-          <Form.Item name="plmns" label="PLMNs (comma-separated)" rules={[{ required: true }]}>
+          <Form.Item name="plmns" label="PLMNы (через запятую)" rules={[{ required: true }]}> 
             <Input />
           </Form.Item>
 
           <Form.Item shouldUpdate={(prev, cur) => prev.kind !== cur.kind} noStyle>
             {() => (
               form.getFieldValue('kind') === 'series' ? (
-                <>
-                  <Form.Item name="series" label="Series prefix" rules={[{ required: true }]}><Input /></Form.Item>
-                  <Form.Item name="count" label="Count"><Input type="number" /></Form.Item>
+                  <>
+                  <Form.Item name="series" label="Префикс серии" rules={[{ required: true }]}><Input /></Form.Item>
+                  <Form.Item name="count" label="Кол-во"><Input type="number" /></Form.Item>
                 </>
               ) : (
                 <>
-                  <Form.Item name="start" label="Start MSIN" rules={[{ required: true }]}><Input /></Form.Item>
-                  <Form.Item name="end" label="End MSIN" rules={[{ required: true }]}><Input /></Form.Item>
+                  <Form.Item name="start" label="Начало MSIN" rules={[{ required: true }]}><Input /></Form.Item>
+                  <Form.Item name="end" label="Конец MSIN" rules={[{ required: true }]}><Input /></Form.Item>
                 </>
               )
             )}
           </Form.Item>
-
-          <Form.Item name="apnProfile" label="APN Profile (optional)"><Input /></Form.Item>
+          <Form.Item name="apnProfile" label="APN профиль (необязательно)"><Input /></Form.Item>
           <Form.Item>
             <Space>
-              <Button onClick={()=>setModalVisible(false)}>Cancel</Button>
-              <Button type="primary" htmlType="submit">Create</Button>
+              <Button onClick={()=>setModalVisible(false)}>Отмена</Button>
+              <Button type="primary" htmlType="submit">Создать</Button>
             </Space>
           </Form.Item>
         </Form>
