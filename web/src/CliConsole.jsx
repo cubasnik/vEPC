@@ -66,10 +66,9 @@ export default function CliConsole(){
     <Card title="CLI" extra={<Space><Input placeholder="API token (optional)" value={token} onChange={e=>setToken(e.target.value)} style={{width:220}} /><Button onClick={run} loading={loading}>Run</Button></Space>} style={{marginTop:12}}>
       <Space direction="vertical" style={{width:'100%'}}>
         <Space style={{marginBottom:8}}>
-          <Select value={cmd} style={{width:300}} onChange={v=>setCmd(v)}>
+          <Select value={cmd} style={{width:420}} onChange={v=>setCmd(v)}>
             {presets.map(p => <Option key={p} value={p}>{p}</Option>)}
           </Select>
-          <Input style={{width:400}} value={cmd} onChange={e=>setCmd(e.target.value)} />
         </Space>
 
         <Space style={{marginBottom:8}}>
