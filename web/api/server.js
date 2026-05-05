@@ -274,24 +274,28 @@ app.post('/api/imsi', requireAuth, async (req, res) => {
   if (plmnList.length === 0) return res.status(400).json({ ok: false, reason: 'invalid plmns' });
 
   const cmds = [];
-  cmds.push(`set imsi-group.${name}.type ${kind}`);
-  cmds.push(`set imsi-group.${name}.plmn ${plmns}`);
+  // Prefer using structured CLI commands which set fields atomically
+  // Use one command per PLMN when multiple provided
   if (kind === 'range') {
     const start = String(body.start || '').trim();
     const end = String(body.end || '').trim();
     if (!/^\d+$/.test(start) || !/^\d+$/.test(end)) return res.status(400).json({ ok: false, reason: 'invalid range boundaries' });
-    cmds.push(`set imsi-group.${name}.range-start ${start}`);
-    cmds.push(`set imsi-group.${name}.range-end ${end}`);
+    for (const p of plmnList) {
+      const apn = body.apnProfile ? ` ${String(body.apnProfile)}` : ''
+      cmds.push(`imsi range ${name} ${p} ${start} ${end}${apn}`)
+    }
   } else if (kind === 'series') {
     const series = String(body.series || '').trim();
     const count = body.count ? parseInt(body.count, 10) : null;
     if (!/^[0-9]+$/.test(series)) return res.status(400).json({ ok: false, reason: 'invalid series prefix' });
-    cmds.push(`set imsi-group.${name}.series ${series}`);
-    if (count) cmds.push(`set imsi-group.${name}.count ${count}`);
+    for (const p of plmnList) {
+      const apn = body.apnProfile ? ` ${String(body.apnProfile)}` : ''
+      cmds.push(`imsi series ${name} ${p} ${series}${apn}`)
+      if (count) cmds.push(`set imsi-group.${name}.count ${count}`)
+    }
   } else {
     return res.status(400).json({ ok: false, reason: 'unknown kind (range|series)' });
   }
-  if (body.apnProfile) cmds.push(`set imsi-group.${name}.apn-profile ${String(body.apnProfile)}`);
 
   try {
     const out = await execCliCommand(cmds.join('\n') + '\n');
