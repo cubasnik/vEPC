@@ -1,10 +1,12 @@
 import React from 'react'
-import { Card, Table, Button, Space, message, Spin } from 'antd'
+import { Card, Table, Button, Space, message, Spin, Modal } from 'antd'
 
 export default function Interfaces(){
   const [ifaces, setIfaces] = React.useState([])
   const [loading, setLoading] = React.useState(false)
   const [expandedRowKeys, setExpandedRowKeys] = React.useState([])
+  const [diagModalVisible, setDiagModalVisible] = React.useState(false)
+  const [diagModalContent, setDiagModalContent] = React.useState('')
 
   async function load(){
     setLoading(true)
@@ -14,8 +16,6 @@ export default function Interfaces(){
       if (!j.ok) throw new Error(j.reason || 'failed')
       const list = j.interfaces || []
       setIfaces(list)
-      // expand rows that have diagnostic text by default
-      setExpandedRowKeys(list.filter(i => i.diagnostic).map(i => i.name))
     } catch (e) { message.error(e.message) }
     finally { setLoading(false) }
   }
@@ -29,7 +29,13 @@ export default function Interfaces(){
     { title: 'Admin', dataIndex: 'admin', key: 'admin' },
     { title: 'Oper', dataIndex: 'oper', key: 'oper' },
     { title: 'Impl', dataIndex: 'implementation', key: 'implementation' },
-    { title: 'Peer', dataIndex: 'peer', key: 'peer' }
+    { title: 'Peer', dataIndex: 'peer', key: 'peer' },
+    { title: 'Diag', dataIndex: 'diagnostic', key: 'diagnostic', render: t => (
+        t ? <div style={{display:'flex', alignItems:'center', gap:8}}>
+          <div style={{maxWidth: 420, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'}} title={t}>{t}</div>
+          <Button size="small" onClick={() => { setDiagModalContent(t); setDiagModalVisible(true) }}>Подробнее</Button>
+        </div> : null
+      ) }
   ]
 
   return (
@@ -45,10 +51,11 @@ export default function Interfaces(){
             rowExpandable: record => !!record.diagnostic,
             expandRowByClick: true
           }}
-          expandedRowKeys={expandedRowKeys}
-          onExpandedRowsChange={keys => setExpandedRowKeys(keys)}
         />
       </Spin>
+      <Modal title="Diagnostic details" open={diagModalVisible} onCancel={()=>setDiagModalVisible(false)} footer={null} width={800}>
+        <div style={{whiteSpace:'pre-wrap', wordBreak:'break-word'}}>{diagModalContent}</div>
+      </Modal>
     </Card>
   )
 }
