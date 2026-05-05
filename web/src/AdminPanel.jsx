@@ -1,6 +1,7 @@
 import React from 'react'
 import { Tabs, Card, Button, Space, message, Modal } from 'antd'
 import ImsiManager from './ImsiManager'
+import Interfaces from './Interfaces'
 
 const { TabPane } = Tabs
 
@@ -40,29 +41,20 @@ export default function AdminPanel(){
     <Card title="Admin" style={{marginTop:12}}>
       <Tabs defaultActiveKey="interfaces">
         <TabPane tab="Interfaces" key="interfaces">
-          <Space style={{marginBottom:8}}>
-            <Button onClick={()=>callApi('/api/interfaces')}>Refresh Interfaces</Button>
-            <Button onClick={()=>callApi('/api/runtime')}>Show Runtime</Button>
-          </Space>
+          <Interfaces />
         </TabPane>
 
         <TabPane tab="Physical Ports" key="ports">
-          <Space style={{marginBottom:8}}>
-            <Button onClick={()=>callApi('/api/interfaces')}>Show Physical Ports</Button>
-          </Space>
-          <div style={{marginTop:8}}>
-            <small>Physical ports are derived from interfaces output.</small>
-          </div>
+          <Interfaces filterPhysical />
         </TabPane>
 
         <TabPane tab="IMSI" key="imsi">
           <ImsiManager />
         </TabPane>
 
-        <TabPane tab="Runtime / Config" key="runtime">
+        <TabPane tab="Runtime" key="runtime">
           <Space style={{marginBottom:8}}>
             <Button onClick={()=>callApi('/api/runtime')}>Show Runtime</Button>
-            <Button onClick={()=>callApi('/api/show-config')}>Show Config</Button>
           </Space>
         </TabPane>
 

@@ -1,7 +1,7 @@
 import React from 'react'
 import { Card, Table, Button, Space, message, Spin, Modal } from 'antd'
 
-export default function Interfaces(){
+export default function Interfaces({ filterPhysical = false }){
   const [ifaces, setIfaces] = React.useState([])
   const [loading, setLoading] = React.useState(false)
   const [expandedRowKeys, setExpandedRowKeys] = React.useState([])
@@ -14,7 +14,10 @@ export default function Interfaces(){
       const res = await fetch('/api/interfaces')
       const j = await res.json()
       if (!j.ok) throw new Error(j.reason || 'failed')
-      const list = j.interfaces || []
+      let list = j.interfaces || []
+      if (filterPhysical) {
+        list = list.filter(i => (i.implementation || '').toUpperCase() === 'IMPLEMENTED')
+      }
       setIfaces(list)
     } catch (e) { message.error(e.message) }
     finally { setLoading(false) }
