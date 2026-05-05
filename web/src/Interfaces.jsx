@@ -32,8 +32,10 @@ export default function Interfaces(){
     { title: 'Peer', dataIndex: 'peer', key: 'peer' },
     { title: 'Diag', dataIndex: 'diagnostic', key: 'diagnostic', render: t => (
         t ? <div style={{display:'flex', alignItems:'center', gap:8}}>
-          <div style={{maxWidth: 420, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'}} title={t}>{t}</div>
-          <Button size="small" onClick={() => { setDiagModalContent(t); setDiagModalVisible(true) }}>Подробнее</Button>
+          <div style={{flex: 1, minWidth: 0}}>
+            <div style={{whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'}} title={t}>{t}</div>
+          </div>
+          <Button size="small" style={{flex: '0 0 auto'}} onClick={() => { setDiagModalContent(t); setDiagModalVisible(true) }}>Подробнее</Button>
         </div> : null
       ) }
   ]
@@ -41,17 +43,19 @@ export default function Interfaces(){
   return (
     <Card title="Interfaces" extra={<Space><Button onClick={load}>Refresh</Button></Space>} style={{marginTop:12}}>
       <Spin spinning={loading}>
-        <Table
-          dataSource={ifaces}
-          columns={columns}
-          rowKey={r=>r.name}
-          pagination={false}
-          expandable={{
-            expandedRowRender: record => <div style={{whiteSpace:'pre-wrap', wordBreak:'break-word'}}>{record.diagnostic || ''}</div>,
-            rowExpandable: record => !!record.diagnostic,
-            expandRowByClick: true
-          }}
-        />
+        <div style={{overflowX: 'hidden'}}>
+          <Table
+            dataSource={ifaces}
+            columns={columns}
+            rowKey={r=>r.name}
+            pagination={false}
+            expandable={{
+              expandedRowRender: record => <div style={{whiteSpace:'pre-wrap', wordBreak:'break-word'}}>{record.diagnostic || ''}</div>,
+              rowExpandable: record => !!record.diagnostic,
+              expandRowByClick: true
+            }}
+          />
+        </div>
       </Spin>
       <Modal title="Diagnostic details" open={diagModalVisible} onCancel={()=>setDiagModalVisible(false)} footer={null} width={800}>
         <div style={{whiteSpace:'pre-wrap', wordBreak:'break-word'}}>{diagModalContent}</div>
