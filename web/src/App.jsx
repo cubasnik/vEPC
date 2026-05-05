@@ -40,9 +40,6 @@ export default function App() {
           <Col xs={24} lg={16}>
             <div>
               <AdminPanel />
-              <ShowConfig />
-              <Interfaces />
-              <Runtime />
             </div>
           </Col>
         </Row>

@@ -207,21 +207,19 @@ function parseInterfaces(text) {
 // GET /api/imsi - list IMSI groups
 app.get('/api/imsi', requireAuth, async (req, res) => {
   try {
-    // Prefer reading mounted config file when available (non-interactive, reliable)
-    const cfgPath = '/etc/vepc/vepc.config'
-    if (fs.existsSync(cfgPath)) {
-      const data = fs.readFileSync(cfgPath, 'utf8')
-      const parsed = parseImsiGroups(data)
-      return res.json({ ok: true, groups: parsed })
-    }
-
-    // Fallback: try asking the CLI. Some vEPC builds may not support 'show running-config'.
-    // Try a generic 'show' as a last resort and parse output.
+    // Prefer asking the CLI first to get live state; fall back to mounted config file if CLI unavailable.
     try {
       const out = await execCliCommand('show\n')
       const parsed = parseImsiGroups(out)
       return res.json({ ok: true, groups: parsed })
     } catch (e) {
+      // CLI may be unavailable; fallback to reading mounted config file for persisted groups
+      const cfgPath = '/etc/vepc/vepc.config'
+      if (fs.existsSync(cfgPath)) {
+        const data = fs.readFileSync(cfgPath, 'utf8')
+        const parsed = parseImsiGroups(data)
+        return res.json({ ok: true, groups: parsed })
+      }
       return res.status(500).json({ ok: false, reason: "running-config not available: " + e.message })
     }
   } catch (e) {
