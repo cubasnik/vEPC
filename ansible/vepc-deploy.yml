@@ -431,13 +431,21 @@
 
         - name: Try build vepc core image (disable BuildKit, optional no-cache, use host network, cache-from)
           shell: |
+            set -o pipefail
             cd {{ vepc_repo_path }}
             export DOCKER_BUILDKIT=0
-            {% if vepc_force_rebuild | default(false) | bool %}
-            docker build --network=host --no-cache -f {{ vepc_repo_path }}/Dockerfile -t vepc-vepc:latest {{ vepc_repo_path }}
-            {% else %}
-            docker build --network=host --cache-from {{ vepc_previous_image_cache }} -f {{ vepc_repo_path }}/Dockerfile -t vepc-vepc:latest {{ vepc_repo_path }}
-            {% endif %}
+            BUILD_LOG=/var/log/vepc_core_build.log
+            rm -f "$BUILD_LOG" || true
+            echo "Starting vEPC core build: $(date -u +"%Y-%m-%dT%H:%M:%SZ")" | tee -a "$BUILD_LOG"
+            if [ "{{ vepc_force_rebuild | default(false) | bool }}" = "True" ] || [ "{{ vepc_force_rebuild | default(false) | bool }}" = "true" ]; then
+              ( time docker build --network=host --no-cache -f {{ vepc_repo_path }}/Dockerfile -t vepc-vepc:latest {{ vepc_repo_path }} ) 2>&1 | tee -a "$BUILD_LOG"
+            else
+              ( time docker build --network=host --cache-from {{ vepc_previous_image_cache }} -f {{ vepc_repo_path }}/Dockerfile -t vepc-vepc:latest {{ vepc_repo_path }} ) 2>&1 | tee -a "$BUILD_LOG"
+            fi
+            rc=${PIPESTATUS[0]}
+            echo "BUILD_EXIT_CODE=${rc}" | tee -a "$BUILD_LOG"
+            echo "Finished vEPC core build: $(date -u +"%Y-%m-%dT%H:%M:%SZ")" | tee -a "$BUILD_LOG"
+            exit $rc
           register: core_build
           become: yes
           retries: 3
