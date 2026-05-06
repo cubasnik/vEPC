@@ -246,8 +246,15 @@ app.get('/api/imsi', requireAuth, async (req, res) => {
     let out = null
     try {
       out = await execCliCommand('show running-config\n')
+      // treat 'Unknown command' or 'Available:' as not supported and fall back
+      if (out && (/Unknown command:/i.test(out) || /Available:/i.test(out))) {
+        out = null
+      }
     } catch (e) {
-      // try generic show as fallback
+      out = null
+    }
+
+    if (!out) {
       try { out = await execCliCommand('show\n') } catch (e2) { out = null }
     }
 
