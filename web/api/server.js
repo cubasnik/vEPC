@@ -604,6 +604,39 @@ if (fs.existsSync(DIST)) {
 
 const port = process.env.PORT || 3000
 // initialize DB if possible
-db.init().then(() => console.log('DB initialized')).catch(() => {/* ignore db init errors here */})
+async function seedFromConfig() {
+  try {
+    const cfgPath = '/etc/vepc/vepc.config'
+    if (!fs.existsSync(cfgPath)) return
+    const data = fs.readFileSync(cfgPath, 'utf8')
+    const groups = parseImsiGroups(data)
+    if (!groups || groups.length === 0) return
+    await db.init()
+    const pool = await db.getPool()
+    for (const g of groups) {
+      // g may represent a single plmn; ensure values are normalized
+      const name = g.name
+      const kind = g.type && g.type.length ? g.type : (g.series ? 'series' : (g.rangeStart || g.rangeEnd ? 'range' : 'series'))
+      const plmn = g.plmn || ''
+      const series = g.series || null
+      const range_start = g.rangeStart || g.range_start || null
+      const range_end = g.rangeEnd || g.range_end || null
+      const apn = g.apnProfile || g.apn_profile || null
+      const cnt = g.count ? parseInt(g.count, 10) : (g.cnt ? parseInt(g.cnt, 10) : null)
+
+      const sql = `INSERT INTO imsi_groups (name, kind, plmn, series, range_start, range_end, apn_profile, cnt) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE kind=VALUES(kind), series=VALUES(series), range_start=VALUES(range_start), range_end=VALUES(range_end), apn_profile=VALUES(apn_profile), cnt=VALUES(cnt)`
+      await pool.query(sql, [name, kind, plmn, series, range_start, range_end, apn, cnt])
+    }
+    console.log('Seeded imsi_groups from config:', groups.length)
+  } catch (e) {
+    console.warn('seedFromConfig failed:', e && e.message)
+  }
+}
+
+db.init().then(() => {
+  console.log('DB initialized')
+  // attempt seeding from mounted config (non-fatal)
+  seedFromConfig().catch(() => {})
+}).catch(() => {/* ignore db init errors here */})
 
 app.listen(port, () => console.log(`vepc-web api listening ${port}`))
