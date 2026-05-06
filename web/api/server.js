@@ -9,6 +9,7 @@ app.use(express.json())
 
 const net = require('net')
 const CLI_SOCKET = process.env.CLI_SOCKET || '/tmp/vepc.sock'
+const db = require('./db')
 
 // simple token auth and whitelist
 const API_TOKEN = process.env.API_TOKEN || ''
@@ -241,6 +242,16 @@ function parseInterfaces(text) {
 // GET /api/imsi - list IMSI groups
 app.get('/api/imsi', requireAuth, async (req, res) => {
   try {
+    // If DB is available, use it as authoritative source
+    try {
+      await db.init()
+      const pool = await db.getPool()
+      const [rows] = await pool.query('SELECT * FROM imsi_groups ORDER BY id ASC')
+      return res.json({ ok: true, groups: rows.map(r => ({ name: r.name, kind: r.kind, plmn: r.plmn, series: r.series, rangeStart: r.range_start, rangeEnd: r.range_end, apnProfile: r.apn_profile, count: r.cnt })) })
+    } catch (dbe) {
+      // DB not available, fall back to previous behavior using CLI/config
+    }
+
     // Try to fetch running-config first (more likely to contain imsi-group entries),
     // then fall back to the generic 'show' or mounted config file.
     let out = null
@@ -288,41 +299,58 @@ app.post('/api/imsi', requireAuth, async (req, res) => {
   // validate plmns as comma-separated words
   const plmnList = plmns.split(',').map(s => s.trim()).filter(s => s.length > 0);
   if (plmnList.length === 0) return res.status(400).json({ ok: false, reason: 'invalid plmns' });
-
-  const cmds = [];
-  // Prefer using structured CLI commands which set fields atomically
-  // Use one command per PLMN when multiple provided
-  if (kind === 'range') {
-    const start = String(body.start || '').trim();
-    const end = String(body.end || '').trim();
-    if (!/^\d+$/.test(start) || !/^\d+$/.test(end)) return res.status(400).json({ ok: false, reason: 'invalid range boundaries' });
-    for (const p of plmnList) {
-      const apn = body.apnProfile ? ` ${String(body.apnProfile)}` : ''
-      cmds.push(`imsi range ${name} ${p} ${start} ${end}${apn}`)
-    }
-  } else if (kind === 'series') {
-    const series = String(body.series || '').trim();
-    const count = body.count ? parseInt(body.count, 10) : null;
-    if (!/^[0-9]+$/.test(series)) return res.status(400).json({ ok: false, reason: 'invalid series prefix' });
-    for (const p of plmnList) {
-      const apn = body.apnProfile ? ` ${String(body.apnProfile)}` : ''
-      cmds.push(`imsi series ${name} ${p} ${series}${apn}`)
-      if (count) cmds.push(`set imsi-group.${name}.count ${count}`)
-    }
-  } else {
-    return res.status(400).json({ ok: false, reason: 'unknown kind (range|series)' });
-  }
-
+  // Insert into DB (one row per PLMN)
   try {
-    const out = await execCliCommand(cmds.join('\n') + '\n');
-    // try to fetch updated groups right after applying changes
-    try {
-      const fresh = await execCliCommand('show\n')
-      const parsed = parseImsiGroups(fresh)
-      return res.json({ ok: true, out, groups: parsed })
-    } catch (e) {
-      return res.json({ ok: true, out })
+    await db.init()
+    const pool = await db.getPool()
+    const inserted = []
+    for (const p of plmnList) {
+      const params = {
+        name,
+        kind,
+        plmn: p,
+        series: null,
+        range_start: null,
+        range_end: null,
+        apn_profile: body.apnProfile || null,
+        cnt: body.count ? parseInt(body.count, 10) : null
+      }
+      if (kind === 'range') {
+        const start = String(body.start || '').trim();
+        const end = String(body.end || '').trim();
+        if (!/^\d+$/.test(start) || !/^\d+$/.test(end)) return res.status(400).json({ ok: false, reason: 'invalid range boundaries' });
+        params.range_start = start
+        params.range_end = end
+      } else if (kind === 'series') {
+        const series = String(body.series || '').trim();
+        if (!/^[0-9]+$/.test(series)) return res.status(400).json({ ok: false, reason: 'invalid series prefix' });
+        params.series = series
+      } else {
+        return res.status(400).json({ ok: false, reason: 'unknown kind (range|series)' });
+      }
+
+      // Upsert row
+      const sql = `INSERT INTO imsi_groups (name, kind, plmn, series, range_start, range_end, apn_profile, cnt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE kind=VALUES(kind), series=VALUES(series), range_start=VALUES(range_start), range_end=VALUES(range_end), apn_profile=VALUES(apn_profile), cnt=VALUES(cnt)`
+      await pool.query(sql, [params.name, params.kind, params.plmn, params.series, params.range_start, params.range_end, params.apn_profile, params.cnt])
+      inserted.push({ ...params })
     }
+
+    // best-effort: send CLI commands to core to keep runtime in sync
+    try {
+      const cmds = []
+      for (const item of inserted) {
+        if (item.kind === 'range') cmds.push(`imsi range ${item.name} ${item.plmn} ${item.range_start} ${item.range_end} ${item.apn_profile ? item.apn_profile : ''}`)
+        else cmds.push(`imsi series ${item.name} ${item.plmn} ${item.series} ${item.apn_profile ? item.apn_profile : ''}`)
+        if (item.cnt) cmds.push(`set imsi-group.${item.name}.count ${item.cnt}`)
+      }
+      if (cmds.length) {
+        try { await execCliCommand(cmds.join('\n') + '\n') } catch (e) { /* ignore CLI errors */ }
+      }
+    } catch (e) {}
+
+    const [rows] = await pool.query('SELECT * FROM imsi_groups ORDER BY id ASC')
+    return res.json({ ok: true, groups: rows.map(r => ({ name: r.name, kind: r.kind, plmn: r.plmn, series: r.series, rangeStart: r.range_start, rangeEnd: r.range_end, apnProfile: r.apn_profile, count: r.cnt })) })
   } catch (e) {
     res.status(500).json({ ok: false, reason: e.message });
   }
@@ -334,17 +362,20 @@ app.delete('/api/imsi/:name', requireAuth, async (req, res) => {
   if (!name) return res.status(400).json({ ok: false, reason: 'missing name' });
   const fields = ['type','plmn','series','range-start','range-end','apn-profile','count'];
   // create commands to clear each field (set to empty)
-  const cmds = fields.map(f => `set imsi-group.${name}.${f} `);
-  // send clearing commands (set to empty)
   try {
-    const out = await execCliCommand(cmds.join('\n') + '\n');
+    await db.init()
+    const pool = await db.getPool()
+    // delete all rows with given name
+    await pool.query('DELETE FROM imsi_groups WHERE name = ?', [name])
+
+    // best-effort: clear in core runtime
     try {
-      const fresh = await execCliCommand('show\n')
-      const parsed = parseImsiGroups(fresh)
-      return res.json({ ok: true, out, groups: parsed })
-    } catch (e) {
-      return res.json({ ok: true, out })
-    }
+      const cmds = fields.map(f => `set imsi-group.${name}.${f} `)
+      try { await execCliCommand(cmds.join('\n') + '\n') } catch (e) { /* ignore */ }
+    } catch (e) {}
+
+    const [rows] = await pool.query('SELECT * FROM imsi_groups ORDER BY id ASC')
+    return res.json({ ok: true, groups: rows.map(r => ({ name: r.name, kind: r.kind, plmn: r.plmn, series: r.series, rangeStart: r.range_start, rangeEnd: r.range_end, apnProfile: r.apn_profile, count: r.cnt })) })
   } catch (e) {
     res.status(500).json({ ok: false, reason: e.message });
   }
@@ -355,43 +386,59 @@ app.put('/api/imsi/:name', requireAuth, async (req, res) => {
   const name = String(req.params.name || '').trim();
   if (!name) return res.status(400).json({ ok: false, reason: 'missing name' });
   const body = req.body || {};
-  const cmds = [];
-  if (body.plmns) cmds.push(`set imsi-group.${name}.plmn ${String(body.plmns)}`);
-  if (body.kind) cmds.push(`set imsi-group.${name}.type ${String(body.kind)}`);
-  if (body.apnProfile) cmds.push(`set imsi-group.${name}.apn-profile ${String(body.apnProfile)}`);
-  if (body.kind === 'range' || body.start || body.end) {
-    if (body.start) {
-      if (!/^\d+$/.test(String(body.start))) return res.status(400).json({ ok: false, reason: 'invalid start' });
-      cmds.push(`set imsi-group.${name}.range-start ${String(body.start)}`);
-    }
-    if (body.end) {
-      if (!/^\d+$/.test(String(body.end))) return res.status(400).json({ ok: false, reason: 'invalid end' });
-      cmds.push(`set imsi-group.${name}.range-end ${String(body.end)}`);
-    }
-  }
-  if (body.kind === 'series' || body.series) {
-    if (body.series) {
-      if (!/^[0-9]+$/.test(String(body.series))) return res.status(400).json({ ok: false, reason: 'invalid series' });
-      cmds.push(`set imsi-group.${name}.series ${String(body.series)}`);
-    }
-    if (body.count) {
-      const c = parseInt(body.count, 10);
-      if (isNaN(c)) return res.status(400).json({ ok: false, reason: 'invalid count' });
-      cmds.push(`set imsi-group.${name}.count ${c}`);
-    }
-  }
-
-  if (cmds.length === 0) return res.status(400).json({ ok: false, reason: 'no fields to update' });
-
   try {
-    const out = await execCliCommand(cmds.join('\n') + '\n');
-    try {
-      const fresh = await execCliCommand('show\n')
-      const parsed = parseImsiGroups(fresh)
-      return res.json({ ok: true, out, groups: parsed })
-    } catch (e) {
-      return res.json({ ok: true, out })
+    await db.init()
+    const pool = await db.getPool()
+    // We treat updates as possibly affecting multiple rows if plmns provided.
+    const updates = []
+    if (body.plmns) {
+      // replace plmns: delete existing rows for name and insert new ones
+      const plmnList = String(body.plmns).split(',').map(s => s.trim()).filter(Boolean)
+      if (plmnList.length === 0) return res.status(400).json({ ok: false, reason: 'invalid plmns' });
+      await pool.query('DELETE FROM imsi_groups WHERE name = ?', [name])
+      for (const p of plmnList) {
+        updates.push({ name, plmn: p })
+      }
     }
+
+    // For simple field updates, update existing rows
+    const fields = {}
+    if (body.kind) fields.kind = String(body.kind)
+    if (body.apnProfile) fields.apn_profile = String(body.apnProfile)
+    if (body.start) fields.range_start = String(body.start)
+    if (body.end) fields.range_end = String(body.end)
+    if (body.series) fields.series = String(body.series)
+    if (body.count) fields.cnt = parseInt(body.count, 10)
+
+    if (updates.length > 0) {
+      for (const u of updates) {
+        const sql = `INSERT INTO imsi_groups (name, kind, plmn, series, range_start, range_end, apn_profile, cnt) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE kind=VALUES(kind), series=VALUES(series), range_start=VALUES(range_start), range_end=VALUES(range_end), apn_profile=VALUES(apn_profile), cnt=VALUES(cnt)`
+        await pool.query(sql, [u.name, body.kind || 'series', u.plmn, body.series || null, body.start || null, body.end || null, body.apnProfile || null, body.count ? parseInt(body.count, 10) : null])
+      }
+    }
+
+    if (Object.keys(fields).length > 0) {
+      const setParts = []
+      const params = []
+      for (const k of Object.keys(fields)) { setParts.push(`${k} = ?`); params.push(fields[k]) }
+      params.push(name)
+      await pool.query(`UPDATE imsi_groups SET ${setParts.join(', ')} WHERE name = ?`, params)
+    }
+
+    // best-effort: reflect changes to core runtime
+    try {
+      const [rows] = await pool.query('SELECT * FROM imsi_groups WHERE name = ? ORDER BY id ASC', [name])
+      const cmds = []
+      for (const r of rows) {
+        if (r.kind === 'range') cmds.push(`imsi range ${r.name} ${r.plmn} ${r.range_start} ${r.range_end} ${r.apn_profile ? r.apn_profile : ''}`)
+        else cmds.push(`imsi series ${r.name} ${r.plmn} ${r.series} ${r.apn_profile ? r.apn_profile : ''}`)
+        if (r.cnt) cmds.push(`set imsi-group.${r.name}.count ${r.cnt}`)
+      }
+      if (cmds.length) { try { await execCliCommand(cmds.join('\n') + '\n') } catch (e) {} }
+    } catch (e) {}
+
+    const [rows] = await pool.query('SELECT * FROM imsi_groups ORDER BY id ASC')
+    return res.json({ ok: true, groups: rows.map(r => ({ name: r.name, kind: r.kind, plmn: r.plmn, series: r.series, rangeStart: r.range_start, rangeEnd: r.range_end, apnProfile: r.apn_profile, count: r.cnt })) })
   } catch (e) {
     res.status(500).json({ ok: false, reason: e.message });
   }
@@ -556,4 +603,7 @@ if (fs.existsSync(DIST)) {
 }
 
 const port = process.env.PORT || 3000
+// initialize DB if possible
+db.init().then(() => console.log('DB initialized')).catch(() => {/* ignore db init errors here */})
+
 app.listen(port, () => console.log(`vepc-web api listening ${port}`))

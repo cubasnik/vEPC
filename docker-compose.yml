@@ -67,13 +67,30 @@ services:
       - "3000:3000"
     depends_on:
       - vepc
+      - db
     volumes:
       - ./config:/etc/vepc:ro
       - ./sockets:/tmp:rw
     environment:
       - NODE_ENV=production
     restart: unless-stopped
+  db:
+    image: mysql:8.0
+    container_name: vepc-db
+    environment:
+      MYSQL_ROOT_PASSWORD: vepcpass
+      MYSQL_DATABASE: vepc
+      MYSQL_USER: vepc
+      MYSQL_PASSWORD: vepcpass
+    volumes:
+      - vepc-db-data:/var/lib/mysql
+    ports:
+      - "3306:3306"
+    restart: unless-stopped
 
 volumes:
   vepc-logs:
     driver: local
+  vepc-db-data:
+    driver: local
+
