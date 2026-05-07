@@ -1,6 +1,4 @@
-docker exec vepc-web ls -la /app
-docker exec vepc-web cat /app/wait-for-socket.sh
-docker exec vepc-web node -v || true---
+---
 # Ansible Playbook for vEPC Deployment
 # Target: Ubuntu 22 LTS and higher
 # Requirements: Ansible 2.9+, Python 3.8+
