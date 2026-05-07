@@ -3,71 +3,35 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    
     container_name: vepc-mme-sgsn
     hostname: vepc
-    
-    # Network capabilities needed for interface management
     cap_add:
       - SYS_ADMIN
       - NET_ADMIN
       - SYS_PTRACE
-    
-    # Run as root so NET_ADMIN is effective for iproute2 VLAN operations.
     user: "0:0"
-
-    # Use the host network namespace for access to host NICs such as eno2.
+    # Required for Linux interface operations (create-vlan/bind) on host NICs.
     network_mode: host
-    
-      depends_on:
-        - vepc
-        - db
     volumes:
-      # Configuration directory
-      - ./config:/etc/vepc
-      # Logs directory
+      - /etc/vepc:/etc/vepc
       - vepc-logs:/var/log/vepc
-      # Shared socket directory (mounted into /tmp inside containers)
-      - ./sockets:/tmp
-      # Optional: share network namespace for host interface access
-      # - /etc/sysctl.conf:/etc/sysctl.conf:ro
-    
+      - /var/lib/vepc:/var/lib/vepc
+      - /tmp:/tmp
     environment:
-      # Set to 'debug' for verbose logging
-
-    db:
-      image: mysql:8.0
-      container_name: vepc-db
-      environment:
-        MYSQL_ROOT_PASSWORD: vepcpass
-        MYSQL_DATABASE: vepc
-        MYSQL_USER: vepc
-        MYSQL_PASSWORD: vepcpass
-      volumes:
-        - vepc-db-data:/var/lib/mysql
-      ports:
-        - "3306:3306"
-      restart: unless-stopped
-      - LOG_LEVEL=info
-      - CONFIG_PATH=/etc/vepc
-      - LOG_PATH=/var/log/vepc
-    
-    # Keep container running
+      LOG_LEVEL: info
+      CONFIG_PATH: /etc/vepc
+      LOG_PATH: /var/log/vepc
+      VEPC_TRAFFIC_PORTS: 'ens192'
+      VEPC_CLI_SOCKET: /tmp/vepc.sock
     stdin_open: true
     tty: true
-    
-    # Restart policy
     restart: unless-stopped
-    
-    # Health check
     healthcheck:
       test: ["CMD", "/app/vepc-cli", "status"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 30s
-    
-    # Logging configuration
     logging:
       driver: "json-file"
       options:
@@ -79,18 +43,28 @@ services:
     build:
       context: ./web
       dockerfile: Dockerfile
+    image: vepc-vepc-web:latest
     container_name: vepc-web
-    ports:
-      - "3000:3000"
     depends_on:
       - vepc
       - db
-    volumes:
-      - ./config:/etc/vepc:ro
-      - ./sockets:/tmp:rw
     environment:
-      - NODE_ENV=production
+      NODE_ENV: production
+      # allow overriding the CLI socket path and wait timeout from compose
+      CLI_SOCKET: /tmp/vepc.sock
+      WAIT_FOR_SOCKET_TIMEOUT: 60
+    ports:
+      - "3000:3000"
+    volumes:
+      - /tmp:/tmp:rw
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "vepc=web"
+
   db:
     image: mysql:8.0
     container_name: vepc-db
@@ -107,8 +81,6 @@ services:
 
 volumes:
   vepc-logs:
-    driver: local
-  vepc-db-data:
     driver: local
   vepc-db-data:
     driver: local
