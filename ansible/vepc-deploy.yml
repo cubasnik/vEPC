@@ -623,6 +623,17 @@
       register: compose_result
       changed_when: "'Creating' in compose_result.stdout or 'Starting' in compose_result.stdout"
 
+    - name: Ensure vepc-db is connected to compose project network
+      shell: |
+        compose_network="$(basename {{ vepc_repo_path }})_default"
+        if docker network inspect "$compose_network" >/dev/null 2>&1; then
+          if ! docker inspect vepc-db -f '{{"{{json .NetworkSettings.Networks}}"}}' | grep -q "\"$compose_network\""; then
+            docker network connect "$compose_network" vepc-db || true
+          fi
+        fi
+      become: yes
+      changed_when: false
+
     - name: Wait for vEPC service to be ready
       wait_for:
         path: "{{ cli_socket_path }}"
