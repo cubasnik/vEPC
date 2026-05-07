@@ -530,15 +530,32 @@
       changed_when: false
       become: yes
 
-    - name: Start only the DB service (ensure DNS entry and network created)
+    - name: List services defined in docker-compose
+      shell: |
+        cd {{ vepc_repo_path }}
+        {{ docker_compose_cmd }} -f {{ vepc_repo_path }}/docker-compose.yml config --services || true
+      register: compose_services
+      become: yes
+      changed_when: false
+
+    - name: Start DB service if present (ensure DNS entry and network created)
       shell: |
         cd {{ vepc_repo_path }}
         {{ docker_compose_cmd }} -f {{ vepc_repo_path }}/docker-compose.yml up -d db
-      args:
-        chdir: "{{ vepc_repo_path }}"
+      when: "'db' in compose_services.stdout_lines"
       become: yes
       register: db_up
+      failed_when: false
       changed_when: "'Creating' in db_up.stdout or 'Starting' in db_up.stdout or db_up.rc == 0"
+
+    - name: If compose lacks 'db' service, start full stack instead
+      shell: |
+        cd {{ vepc_repo_path }}
+        {{ docker_compose_cmd }} -f {{ vepc_repo_path }}/docker-compose.yml up -d
+      when: "'db' not in compose_services.stdout_lines"
+      become: yes
+      register: db_up_full
+      changed_when: "'Creating' in db_up_full.stdout or 'Starting' in db_up_full.stdout or db_up_full.rc == 0"
 
     - name: Wait for MySQL TCP port 3306 on localhost
       wait_for:
