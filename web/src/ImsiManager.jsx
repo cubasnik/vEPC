@@ -19,7 +19,20 @@ export default function ImsiManager() {
   const load = React.useCallback(() => {
     setLoading(true)
     ApiFetch('/api/imsi', {}, token).then(r => r.json()).then(j => {
-      if (j.ok) setGroups(j.groups || [])
+      if (j.ok) {
+        // normalize API shape to UI fields
+        const normalized = (j.groups || []).map(g => ({
+          name: g.name,
+          kind: g.kind || g.type,
+          plmn: g.plmn || g.plmns,
+          series: g.series || null,
+          rangeStart: g.rangeStart || g.range_start || null,
+          rangeEnd: g.rangeEnd || g.range_end || null,
+          apnProfile: g.apnProfile || g.apn_profile || null,
+          count: g.count || g.cnt || null
+        }))
+        setGroups(normalized)
+      }
       else message.error(j.reason || 'failed to load')
     }).catch(e => message.error(e.message)).finally(() => setLoading(false))
   }, [token])
@@ -56,7 +69,7 @@ export default function ImsiManager() {
       if (!j.ok) throw new Error(j.reason || 'failed')
       message.success('Группа IMSI создана')
       // optimistic update: add created group into local table so user sees it immediately
-      const newGroup = { name: body.name, type: body.kind === 'series' ? 'series' : 'range', plmn: body.plmns }
+      const newGroup = { name: body.name, kind: body.kind === 'series' ? 'series' : 'range', plmn: body.plmns }
       if (body.kind === 'series') { newGroup.series = body.series; if (body.count) newGroup.count = body.count }
       else { newGroup.rangeStart = body.start; newGroup.rangeEnd = body.end }
       setGroups(prev => [newGroup].concat(prev || []))
@@ -88,9 +101,9 @@ export default function ImsiManager() {
 
   const columns = [
     { title: 'Имя', dataIndex: 'name', key: 'name' },
-    { title: 'Тип', dataIndex: 'type', key: 'type' },
+    { title: 'Тип', dataIndex: 'kind', key: 'kind', render: (_, r) => r.kind },
     { title: 'PLMN', dataIndex: 'plmn', key: 'plmn' },
-    { title: 'Детали', key: 'details', render: (_, r) => r.type === 'range' ? `${r.rangeStart}-${r.rangeEnd}` : r.series },
+    { title: 'Детали', key: 'details', render: (_, r) => r.kind === 'range' ? `${r.rangeStart || ''}-${r.rangeEnd || ''}` : r.series || '' },
     { title: 'APN', dataIndex: 'apnProfile', key: 'apnProfile' },
     { title: 'Действия', key: 'actions', render: (_, r) => (<Space><Button size="small" onClick={()=>openEdit(r)}>Ред.</Button><Button danger size="small" onClick={()=>confirmDelete(r.name)}>Удал.</Button></Space>) }
   ]
@@ -99,8 +112,8 @@ export default function ImsiManager() {
     // prefill form with group data and mark editing name
     const values = Object.assign({}, r)
     // normalize fields to expected form names
-    if (values.type === 'series') { values.kind = 'series'; values.series = values.series }
-    else if (values.type === 'range') { values.kind = 'range'; values.start = values.rangeStart; values.end = values.rangeEnd }
+    if (values.kind === 'series') { values.kind = 'series'; values.series = values.series }
+    else if (values.kind === 'range') { values.kind = 'range'; values.start = values.rangeStart; values.end = values.rangeEnd }
     values.plmns = values.plmn
     values._editingName = values.name
     form.setFieldsValue(values)
