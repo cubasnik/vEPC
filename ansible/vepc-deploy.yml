@@ -1,4 +1,6 @@
----
+docker exec vepc-web ls -la /app
+docker exec vepc-web cat /app/wait-for-socket.sh
+docker exec vepc-web node -v || true---
 # Ansible Playbook for vEPC Deployment
 # Target: Ubuntu 22 LTS and higher
 # Requirements: Ansible 2.9+, Python 3.8+
@@ -600,6 +602,25 @@
       until: mysql_check.rc == 0
       become: yes
 
+    - name: Ensure imsi_groups table exists
+      shell: |
+        docker exec -i vepc-db mysql -uvepc -pvepcpass vepc <<'SQL'
+        CREATE TABLE IF NOT EXISTS imsi_groups (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          name VARCHAR(128) NOT NULL,
+          kind VARCHAR(32) NOT NULL,
+          plmn VARCHAR(32) NOT NULL,
+          series VARCHAR(64),
+          range_start VARCHAR(64),
+          range_end VARCHAR(64),
+          apn_profile VARCHAR(128),
+          cnt INT DEFAULT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE KEY uniq_name_plmn (name, plmn)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        SQL
+      become: yes
+
     - name: Remove legacy vepc container if requested
       when: vepc_remove_old_container | bool
       become: yes
@@ -623,12 +644,18 @@
       register: compose_result
       changed_when: "'Creating' in compose_result.stdout or 'Starting' in compose_result.stdout"
 
-    - name: Ensure vepc-db is connected to compose project network
+    - name: Ensure vepc-db is connected to compose project network with alias 'db'
       shell: |
         compose_network="$(basename {{ vepc_repo_path }})_default"
         if docker network inspect "$compose_network" >/dev/null 2>&1; then
           if ! docker inspect vepc-db -f '{{"{{json .NetworkSettings.Networks}}"}}' | grep -q "\"$compose_network\""; then
-            docker network connect "$compose_network" vepc-db || true
+            docker network connect --alias db "$compose_network" vepc-db || true
+          else
+            # ensure alias exists (disconnect/reconnect with alias)
+            if ! docker inspect vepc-db -f '{{"{{json .NetworkSettings.Networks}}"}}' | grep -q '"Aliases":\[.*"db"'; then
+              docker network disconnect "$compose_network" vepc-db || true
+              docker network connect --alias db "$compose_network" vepc-db || true
+            fi
           fi
         fi
       become: yes
