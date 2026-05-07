@@ -1,5 +1,5 @@
 import React from 'react'
-import { Table, Button, Form, Input, Select, Card, Space, Modal, message, Spin } from 'antd'
+import { Table, Button, Form, Input, Select, Card, Space, Modal, message, Spin, InputNumber } from 'antd'
 
 const { Option } = Select
 
@@ -121,37 +121,47 @@ export default function ImsiManager() {
   }
 
   return (
-    <Card title="Группы IMSI" extra={<Space><Input placeholder="API токен (необязательно)" value={token} onChange={e=>setToken(e.target.value)} style={{width:260}} /><Button onClick={load}>Перезагрузить</Button><Button type="primary" onClick={()=>setModalVisible(true)}>Создать</Button></Space>}>
+    <Card title="Группы IMSI" extra={<Space><Input placeholder="API токен (необязательно)" value={token} onChange={e=>setToken(e.target.value)} style={{width:260}} /><Button onClick={load}>Перезагрузить</Button><Button type="primary" onClick={()=>{ form.resetFields(); setModalVisible(true); }}>Создать</Button></Space>}>
       <Spin spinning={loading}>
         <Table rowKey="name" dataSource={groups} columns={columns} pagination={false} />
       </Spin>
 
-      <Modal title="Создать группу IMSI" open={modalVisible} onCancel={()=>setModalVisible(false)} footer={null}>
+      <Modal title={form.getFieldValue('_editingName') ? "Редактировать группу IMSI" : "Создать группу IMSI"} open={modalVisible} onCancel={()=>{ setModalVisible(false); form.resetFields(); }} footer={null}>
         <Form form={form} layout="vertical" onFinish={createGroup} initialValues={{ kind: 'series', count: 10 }}>
-          <Form.Item name="name" label="Имя" rules={[{ required: true }]}> 
+          <Form.Item name="name" label="Имя" rules={[{ required: true, message: 'Введите имя группы' }]}> 
             <Input />
           </Form.Item>
-          <Form.Item name="kind" label="Тип" rules={[{ required: true }]}> 
+          <Form.Item name="kind" label="Тип" rules={[{ required: true, message: 'Выберите тип группы' }]}> 
             <Select>
               <Option value="series">Series</Option>
               <Option value="range">Range</Option>
             </Select>
           </Form.Item>
-          <Form.Item name="plmns" label="PLMNы (через запятую)" rules={[{ required: true }]}> 
-            <Input />
+          <Form.Item name="plmns" label="PLMNы (через запятую)" rules={[{ required: true, message: 'Укажите PLMN(ы)' }, { validator: (_, val) => {
+            if (!val) return Promise.reject()
+            const parts = String(val).split(',').map(s=>s.trim()).filter(Boolean)
+            const ok = parts.every(p => /^[0-9]{5,6}$/.test(p))
+            return ok ? Promise.resolve() : Promise.reject(new Error('Каждый PLMN должен быть MCC+MNC (5-6 цифр)'))
+          }}]}> 
+            <Input placeholder="например: 25001,25002" />
           </Form.Item>
 
           <Form.Item shouldUpdate={(prev, cur) => prev.kind !== cur.kind} noStyle>
             {() => (
               form.getFieldValue('kind') === 'series' ? (
                   <>
-                  <Form.Item name="series" label="Префикс серии" rules={[{ required: true }]}><Input /></Form.Item>
-                  <Form.Item name="count" label="Кол-во"><Input type="number" /></Form.Item>
+                  <Form.Item name="series" label="Префикс серии" rules={[{ required: true, message: 'Укажите префикс серии' }, { validator: (_, val) => (/^[0-9]+$/.test(String(val||'')) ? Promise.resolve() : Promise.reject(new Error('Префикс должен содержать только цифры'))) }]}><Input placeholder="например: 55555" /></Form.Item>
+                  <Form.Item name="count" label="Кол-во" rules={[{ type: 'number', min: 1, message: 'Кол-во должно быть положительным числом' }]}><InputNumber min={1} /></Form.Item>
                 </>
               ) : (
                 <>
-                  <Form.Item name="start" label="Начало MSIN" rules={[{ required: true }]}><Input /></Form.Item>
-                  <Form.Item name="end" label="Конец MSIN" rules={[{ required: true }]}><Input /></Form.Item>
+                  <Form.Item name="start" label="Начало MSIN" rules={[{ required: true, message: 'Укажите начало диапазона' }, { validator: (_, val) => (/^[0-9]+$/.test(String(val||'')) ? Promise.resolve() : Promise.reject(new Error('Начало должно быть числом'))) }]}><Input placeholder="например: 1000" /></Form.Item>
+                  <Form.Item name="end" label="Конец MSIN" rules={[{ required: true, message: 'Укажите конец диапазона' }, { validator: (_, val) => (/^[0-9]+$/.test(String(val||'')) ? Promise.resolve() : Promise.reject(new Error('Конец должен быть числом'))) }, { validator: (_, val) => {
+                    const start = form.getFieldValue('start')
+                    if (!start || !val) return Promise.resolve()
+                    if (String(start).match(/^[0-9]+$/) && String(val).match(/^[0-9]+$/) && (parseInt(start,10) <= parseInt(val,10))) return Promise.resolve()
+                    return Promise.reject(new Error('Конец должен быть >= Начала'))
+                  }]}><Input placeholder="например: 9999" /></Form.Item>
                 </>
               )
             )}
@@ -159,8 +169,8 @@ export default function ImsiManager() {
           <Form.Item name="apnProfile" label="APN профиль (необязательно)"><Input /></Form.Item>
           <Form.Item>
             <Space>
-              <Button onClick={()=>setModalVisible(false)}>Отмена</Button>
-              <Button type="primary" htmlType="submit">Создать</Button>
+              <Button onClick={()=>{ setModalVisible(false); form.resetFields(); }}>Отмена</Button>
+              <Button type="primary" htmlType="submit">{form.getFieldValue('_editingName') ? 'Сохранить' : 'Создать'}</Button>
             </Space>
           </Form.Item>
         </Form>
