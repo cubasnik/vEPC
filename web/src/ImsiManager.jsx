@@ -172,12 +172,17 @@ export default function ImsiManager() {
               ) : (
                 <>
                   <Form.Item name="start" label="Начало MSIN" rules={[{ required: true, message: 'Укажите начало диапазона' }, { validator: (_, val) => (/^[0-9]+$/.test(String(val||'')) ? Promise.resolve() : Promise.reject(new Error('Начало должно быть числом'))) }]}><Input placeholder="например: 1000" /></Form.Item>
-                  <Form.Item name="end" label="Конец MSIN" rules={[{ required: true, message: 'Укажите конец диапазона' }, { validator: (_, val) => (/^[0-9]+$/.test(String(val||'')) ? Promise.resolve() : Promise.reject(new Error('Конец должен быть числом'))) }, { validator: (_, val) => {
-                    const start = form.getFieldValue('start')
-                    if (!start || !val) return Promise.resolve()
-                    if (String(start).match(/^[0-9]+$/) && String(val).match(/^[0-9]+$/) && (parseInt(start,10) <= parseInt(val,10))) return Promise.resolve()
-                    return Promise.reject(new Error('Конец должен быть >= Начала'))
-                  }]}><Input placeholder="например: 9999" /></Form.Item>
+                  <Form.Item name="end" label="Конец MSIN" rules={[
+                    { required: true, message: 'Укажите конец диапазона' },
+                    { validator: (_, val) => {
+                      const start = form.getFieldValue('start')
+                      if (!start || !val) return Promise.resolve()
+                      if (/^[0-9]+$/.test(String(start)) && /^[0-9]+$/.test(String(val)) && (parseInt(start,10) <= parseInt(val,10))) return Promise.resolve()
+                      return Promise.reject(new Error('Конец должен быть >= Начала'))
+                    }}
+                  ]}>
+                    <Input placeholder="например: 9999" />
+                  </Form.Item>
                 </>
               )
             )}
