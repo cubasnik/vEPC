@@ -548,14 +548,39 @@
       failed_when: false
       changed_when: "'Creating' in db_up.stdout or 'Starting' in db_up.stdout or db_up.rc == 0"
 
-    - name: If compose lacks 'db' service, start full stack instead
-      shell: |
-        cd {{ vepc_repo_path }}
-        {{ docker_compose_cmd }} -f {{ vepc_repo_path }}/docker-compose.yml up -d
+    - name: If compose lacks 'db' service, create vepc-db container via docker module
+      block:
+        - name: Ensure vepc-db-data volume exists
+          community.docker.docker_volume:
+            name: vepc-db-data
+            state: present
+          become: yes
+
+        - name: Create/start MySQL container vepc-db
+          community.docker.docker_container:
+            name: vepc-db
+            image: mysql:8.0
+            env:
+              MYSQL_ROOT_PASSWORD: vepcpass
+              MYSQL_DATABASE: vepc
+              MYSQL_USER: vepc
+              MYSQL_PASSWORD: vepcpass
+            volumes:
+              - vepc-db-data:/var/lib/mysql
+            ports:
+              - "3306:3306"
+            restart_policy: unless-stopped
+            state: started
+          become: yes
       when: "'db' not in compose_services.stdout_lines"
-      become: yes
-      register: db_up_full
-      changed_when: "'Creating' in db_up_full.stdout or 'Starting' in db_up_full.stdout or db_up_full.rc == 0"
+      rescue:
+        - name: Fallback - start full compose stack if docker module creation fails
+          shell: |
+            cd {{ vepc_repo_path }}
+            {{ docker_compose_cmd }} -f {{ vepc_repo_path }}/docker-compose.yml up -d
+          become: yes
+          register: db_up_full
+          changed_when: "'Creating' in db_up_full.stdout or 'Starting' in db_up_full.stdout or db_up_full.rc == 0"
 
     - name: Wait for vepc-db container to appear
       shell: |
