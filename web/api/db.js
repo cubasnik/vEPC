@@ -25,8 +25,8 @@ async function getPool() {
 
 async function init() {
   const p = await getPool()
-  // create imsi_groups table if not exists
-  await p.query(`
+  // create imsi_groups table if not exists with retry for transient DNS/connect errors
+  const createSql = `
     CREATE TABLE IF NOT EXISTS imsi_groups (
       id INT AUTO_INCREMENT PRIMARY KEY,
       name VARCHAR(128) NOT NULL,
@@ -40,7 +40,26 @@ async function init() {
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       UNIQUE KEY uniq_name_plmn (name, plmn)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-  `)
+  `
+
+  const maxRetries = 10
+  const delayMs = 2000
+  let attempt = 0
+  while (true) {
+    try {
+      await p.query(createSql)
+      break
+    } catch (err) {
+      attempt += 1
+      const isTransient = err && (err.code === 'ENOTFOUND' || err.code === 'EAI_AGAIN' || err.errno === 'ECONNREFUSED' || err.fatal)
+      if (attempt >= maxRetries || !isTransient) {
+        console.error('DB init failed:', err && err.message)
+        throw err
+      }
+      console.warn(`DB init attempt ${attempt} failed, retrying in ${delayMs}ms...`, err.code || err.message)
+      await new Promise(r => setTimeout(r, delayMs))
+    }
+  }
 
   return p
 }
