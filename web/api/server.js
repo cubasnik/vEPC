@@ -345,7 +345,24 @@ app.post('/api/imsi', requireAuth, async (req, res) => {
         if (item.cnt) cmds.push(`set imsi-group.${item.name}.count ${item.cnt}`)
       }
       if (cmds.length) {
-        try { await execCliCommand(cmds.join('\n') + '\n') } catch (e) { /* ignore CLI errors */ }
+        try {
+          const out = await execCliCommand(cmds.join('\n') + '\n')
+          // if core replies Unknown/Available, fall back to individual 'set' commands
+          if (out && (/Unknown command:/i.test(out) || /Available:/i.test(out))) {
+            const setCmds = []
+            for (const item of inserted) {
+              setCmds.push(`set imsi-group.${item.name}.plmn ${item.plmn}`)
+              if (item.kind === 'series') setCmds.push(`set imsi-group.${item.name}.series ${item.series}`)
+              if (item.kind === 'range') {
+                setCmds.push(`set imsi-group.${item.name}.range-start ${item.range_start}`)
+                setCmds.push(`set imsi-group.${item.name}.range-end ${item.range_end}`)
+              }
+              if (item.apn_profile) setCmds.push(`set imsi-group.${item.name}.apn-profile ${item.apn_profile}`)
+              if (item.cnt) setCmds.push(`set imsi-group.${item.name}.count ${item.cnt}`)
+            }
+            try { await execCliCommand(setCmds.join('\n') + '\n') } catch (e) { /* ignore */ }
+          }
+        } catch (e) { /* ignore CLI errors */ }
       }
     } catch (e) {}
 
@@ -434,7 +451,7 @@ app.put('/api/imsi/:name', requireAuth, async (req, res) => {
         else cmds.push(`imsi series ${r.name} ${r.plmn} ${r.series} ${r.apn_profile ? r.apn_profile : ''}`)
         if (r.cnt) cmds.push(`set imsi-group.${r.name}.count ${r.cnt}`)
       }
-      if (cmds.length) { try { await execCliCommand(cmds.join('\n') + '\n') } catch (e) {} }
+      if (cmds.length) { try { const out = await execCliCommand(cmds.join('\n') + '\n'); if (out && (/Unknown command:/i.test(out) || /Available:/i.test(out))) { const setCmds = []; for (const r of rows) { if (r.kind === 'range') setCmds.push(`set imsi-group.${r.name}.plmn ${r.plmn}`); else setCmds.push(`set imsi-group.${r.name}.plmn ${r.plmn}`); if (r.kind === 'range') { setCmds.push(`set imsi-group.${r.name}.range-start ${r.range_start}`); setCmds.push(`set imsi-group.${r.name}.range-end ${r.range_end}`); } else { setCmds.push(`set imsi-group.${r.name}.series ${r.series}`); } if (r.apn_profile) setCmds.push(`set imsi-group.${r.name}.apn-profile ${r.apn_profile}`); if (r.cnt) setCmds.push(`set imsi-group.${r.name}.count ${r.cnt}`); } try { await execCliCommand(setCmds.join('\n') + '\n') } catch (e) {} } } catch (e) {} }
     } catch (e) {}
 
     const [rows] = await pool.query('SELECT * FROM imsi_groups ORDER BY id ASC')
