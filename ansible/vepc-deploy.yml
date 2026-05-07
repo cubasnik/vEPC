@@ -557,19 +557,21 @@
       register: db_up_full
       changed_when: "'Creating' in db_up_full.stdout or 'Starting' in db_up_full.stdout or db_up_full.rc == 0"
 
-    - name: Wait for MySQL TCP port 3306 on localhost
-      wait_for:
-        host: 127.0.0.1
-        port: 3306
-        delay: 3
-        timeout: 120
-        state: started
-
-    - name: Verify MySQL service responding inside container
-      shell: docker exec vepc-db mysql -uvepc -pvepcpass -e "SELECT 1;"
-      register: mysql_check
+    - name: Wait for vepc-db container to appear
+      shell: |
+        docker ps -a --filter "name=vepc-db" --format '{{"{{.Names}}"}}' | grep -w vepc-db || true
+      register: db_container_present
       retries: 8
       delay: 3
+      until: db_container_present.stdout.find('vepc-db') != -1
+      become: yes
+
+    - name: Wait for MySQL to accept connections inside container
+      shell: |
+        docker exec vepc-db bash -c 'mysql -uvepc -pvepcpass -e "SELECT 1;"'
+      register: mysql_check
+      retries: 20
+      delay: 6
       until: mysql_check.rc == 0
       become: yes
 
