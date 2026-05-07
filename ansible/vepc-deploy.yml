@@ -538,6 +538,25 @@
       become: yes
       changed_when: false
 
+    - name: If performing clean redeploy, remove existing DB volumes to ensure a fresh database
+      when: vepc_redeploy_clean | bool
+      become: yes
+      block:
+        - name: Remove known DB volume 'vepc-db-data' if present
+          shell: |
+            if docker volume inspect vepc-db-data >/dev/null 2>&1; then
+              docker volume rm -f vepc-db-data || true
+            fi
+          changed_when: false
+
+        - name: Remove project-scoped DB volume if present ({{ vepc_repo_path | basename }}_vepc-db-data)
+          shell: |
+            proj_vol="{{ vepc_repo_path | basename }}_vepc-db-data"
+            if docker volume inspect "$proj_vol" >/dev/null 2>&1; then
+              docker volume rm -f "$proj_vol" || true
+            fi
+          changed_when: false
+
     - name: Start DB service if present (ensure DNS entry and network created)
       shell: |
         cd {{ vepc_repo_path }}
