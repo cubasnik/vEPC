@@ -15,6 +15,7 @@ export default function ImsiManager() {
   const [token, setToken] = React.useState('')
   const [form] = Form.useForm()
   const [modalVisible, setModalVisible] = React.useState(false)
+  const [syncStatus, setSyncStatus] = React.useState({})
 
   const load = React.useCallback(() => {
     setLoading(true)
@@ -32,6 +33,14 @@ export default function ImsiManager() {
           count: g.count || g.cnt || null
         }))
         setGroups(normalized)
+        // also load sync status
+        ApiFetch('/api/imsi/sync-status', {}, token).then(r2 => r2.json()).then(sj => {
+          if (sj.ok) {
+            const map = {}
+            for (const e of sj.entries || []) map[`${e.name}::${e.plmn}`] = e
+            setSyncStatus(map)
+          }
+        }).catch(()=>{})
       }
       else message.error(j.reason || 'failed to load')
     }).catch(e => message.error(e.message)).finally(() => setLoading(false))
@@ -104,6 +113,13 @@ export default function ImsiManager() {
     { title: 'Тип', dataIndex: 'kind', key: 'kind', render: (_, r) => r.kind },
     { title: 'PLMN', dataIndex: 'plmn', key: 'plmn' },
     { title: 'Детали', key: 'details', render: (_, r) => r.kind === 'range' ? `${r.rangeStart || ''}-${r.rangeEnd || ''}` : r.series || '' },
+    { title: 'Sync', key: 'sync', render: (_, r) => {
+        const key = `${r.name}::${r.plmn}`
+        const s = syncStatus[key]
+        if (!s) return '—'
+        const dt = new Date(s.ts)
+        return s.ok ? `OK (${dt.toLocaleTimeString()})` : `FAILED (${dt.toLocaleTimeString()})`
+      } },
     { title: 'APN', dataIndex: 'apnProfile', key: 'apnProfile' },
     { title: 'Действия', key: 'actions', render: (_, r) => (<Space><Button size="small" onClick={()=>openEdit(r)}>Ред.</Button><Button danger size="small" onClick={()=>confirmDelete(r.name)}>Удал.</Button></Space>) }
   ]

@@ -11,6 +11,24 @@ const net = require('net')
 const CLI_SOCKET = process.env.CLI_SOCKET || '/tmp/vepc.sock'
 const db = require('./db')
 
+// in-memory sync status cache: key = `${name}::${plmn}` -> { ok: boolean, out?: string, err?: string, ts: number }
+const syncStatus = {}
+
+function setSyncStatus(name, plmn, ok, info) {
+  const key = `${name}::${plmn}`
+  syncStatus[key] = { ok: !!ok, ts: Date.now(), ...(ok ? { out: info } : { err: info && info.message ? info.message : String(info) }) }
+}
+
+app.get('/api/imsi/sync-status', requireAuth, (req, res) => {
+  try {
+    const entries = Object.keys(syncStatus).map(k => {
+      const [name, plmn] = k.split('::')
+      return { name, plmn, ...syncStatus[k] }
+    })
+    return res.json({ ok: true, entries })
+  } catch (e) { res.status(500).json({ ok: false, reason: e.message }) }
+})
+
 // simple token auth and whitelist
 const API_TOKEN = process.env.API_TOKEN || ''
 const CLI_WHITELIST = [
@@ -345,26 +363,43 @@ app.post('/api/imsi', requireAuth, async (req, res) => {
         if (item.cnt) cmds.push(`set imsi-group.${item.name}.count ${item.cnt}`)
       }
       if (cmds.length) {
+        let primarySucceeded = false
         try {
           const out = await execCliCommand(cmds.join('\n') + '\n')
-          // if core replies Unknown/Available, fall back to individual 'set' commands
-          if (out && (/Unknown command:/i.test(out) || /Available:/i.test(out))) {
-            const setCmds = []
-            for (const item of inserted) {
-              setCmds.push(`set imsi-group.${item.name}.plmn ${item.plmn}`)
-              if (item.kind === 'series') setCmds.push(`set imsi-group.${item.name}.series ${item.series}`)
-              if (item.kind === 'range') {
-                setCmds.push(`set imsi-group.${item.name}.range-start ${item.range_start}`)
-                setCmds.push(`set imsi-group.${item.name}.range-end ${item.range_end}`)
-              }
-              if (item.apn_profile) setCmds.push(`set imsi-group.${item.name}.apn-profile ${item.apn_profile}`)
-              if (item.cnt) setCmds.push(`set imsi-group.${item.name}.count ${item.cnt}`)
-            }
-            try { await execCliCommand(setCmds.join('\n') + '\n') } catch (e) { /* ignore */ }
+          // if core replies Unknown/Available, treat as failure for primary and try set-style
+          if (!(out && (/Unknown command:/i.test(out) || /Available:/i.test(out)))) {
+            primarySucceeded = true
+            // mark all inserted as synced OK with output
+            for (const item of inserted) setSyncStatus(item.name, item.plmn, true, out)
           }
-        } catch (e) { /* ignore CLI errors */ }
+        } catch (e) {
+          // primary attempt failed
+          primarySucceeded = false
+        }
+
+        if (!primarySucceeded) {
+          // try dotted set-* style commands and mark per-result
+          const setCmds = []
+          for (const item of inserted) {
+            setCmds.push(`set imsi-group.${item.name}.plmn ${item.plmn}`)
+            if (item.kind === 'series') setCmds.push(`set imsi-group.${item.name}.series ${item.series}`)
+            if (item.kind === 'range') {
+              setCmds.push(`set imsi-group.${item.name}.range-start ${item.range_start}`)
+              setCmds.push(`set imsi-group.${item.name}.range-end ${item.range_end}`)
+            }
+            if (item.apn_profile) setCmds.push(`set imsi-group.${item.name}.apn-profile ${item.apn_profile}`)
+            if (item.cnt) setCmds.push(`set imsi-group.${item.name}.count ${item.cnt}`)
+          }
+          try {
+            const out2 = await execCliCommand(setCmds.join('\n') + '\n')
+            for (const item of inserted) setSyncStatus(item.name, item.plmn, true, out2)
+          } catch (e2) {
+            // mark failures per inserted item
+            for (const item of inserted) setSyncStatus(item.name, item.plmn, false, e2)
+          }
+        }
       }
-    } catch (e) {}
+    } catch (e) { /* ignore top-level */ }
 
     const [rows] = await pool.query('SELECT * FROM imsi_groups ORDER BY id ASC')
     return res.json({ ok: true, groups: rows.map(r => ({ name: r.name, kind: r.kind, plmn: r.plmn, series: r.series, rangeStart: r.range_start, rangeEnd: r.range_end, apnProfile: r.apn_profile, count: r.cnt })) })
@@ -382,14 +417,22 @@ app.delete('/api/imsi/:name', requireAuth, async (req, res) => {
   try {
     await db.init()
     const pool = await db.getPool()
-    // delete all rows with given name
+    // fetch existing rows (to record plmns) and then delete
+    const [existing] = await pool.query('SELECT plmn FROM imsi_groups WHERE name = ?', [name])
+    const plmns = (existing || []).map(r => r.plmn)
     await pool.query('DELETE FROM imsi_groups WHERE name = ?', [name])
 
     // best-effort: clear in core runtime
     try {
       const cmds = fields.map(f => `set imsi-group.${name}.${f} `)
-      try { await execCliCommand(cmds.join('\n') + '\n') } catch (e) { /* ignore */ }
-    } catch (e) {}
+      try {
+        await execCliCommand(cmds.join('\n') + '\n')
+        // mark as cleared OK for known plmns
+        for (const p of plmns) setSyncStatus(name, p, true, 'deleted')
+      } catch (e) {
+        for (const p of plmns) setSyncStatus(name, p, false, e)
+      }
+    } catch (e) { for (const p of plmns) setSyncStatus(name, p, false, e) }
 
     const [rows] = await pool.query('SELECT * FROM imsi_groups ORDER BY id ASC')
     return res.json({ ok: true, groups: rows.map(r => ({ name: r.name, kind: r.kind, plmn: r.plmn, series: r.series, rangeStart: r.range_start, rangeEnd: r.range_end, apnProfile: r.apn_profile, count: r.cnt })) })
