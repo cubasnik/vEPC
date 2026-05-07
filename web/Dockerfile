@@ -11,7 +11,9 @@ WORKDIR /app
 COPY --from=builder /app .
 # api dependencies are installed in the builder stage (see below),
 # no need to run `npm ci` here which may miss nested `api/package.json`.
+COPY wait-for-db.js ./
 RUN chmod +x ./wait-for-socket.sh || true
+RUN chmod +x ./wait-for-db.js || true
 ENV NODE_ENV=production
 EXPOSE 3000
 CMD ["./wait-for-socket.sh"]
