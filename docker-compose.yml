@@ -19,6 +19,9 @@ services:
     # Use the host network namespace for access to host NICs such as eno2.
     network_mode: host
     
+      depends_on:
+        - vepc
+        - db
     volumes:
       # Configuration directory
       - ./config:/etc/vepc
@@ -31,6 +34,20 @@ services:
     
     environment:
       # Set to 'debug' for verbose logging
+
+    db:
+      image: mysql:8.0
+      container_name: vepc-db
+      environment:
+        MYSQL_ROOT_PASSWORD: vepcpass
+        MYSQL_DATABASE: vepc
+        MYSQL_USER: vepc
+        MYSQL_PASSWORD: vepcpass
+      volumes:
+        - vepc-db-data:/var/lib/mysql
+      ports:
+        - "3306:3306"
+      restart: unless-stopped
       - LOG_LEVEL=info
       - CONFIG_PATH=/etc/vepc
       - LOG_PATH=/var/log/vepc
@@ -90,6 +107,8 @@ services:
 
 volumes:
   vepc-logs:
+    driver: local
+  vepc-db-data:
     driver: local
   vepc-db-data:
     driver: local
