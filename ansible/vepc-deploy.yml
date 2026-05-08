@@ -522,6 +522,15 @@
         mode: '0644'
       notify: restart vepc container
 
+    - name: Ensure repository is present and up-to-date on target
+      git:
+        repo: "{{ vepc_repo_url }}"
+        dest: "{{ vepc_repo_path }}"
+        version: "{{ vepc_repo_branch }}"
+        force: yes
+        update: yes
+      become: yes
+
     - name: Remove conflicting vepc-db container if present
       shell: |
         if docker ps -a --filter "name=vepc-db" -q | grep -q .; then
