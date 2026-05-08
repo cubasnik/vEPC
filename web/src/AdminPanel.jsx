@@ -2,6 +2,7 @@ import React from 'react'
 import { Tabs, Card, Button, Space, message, Modal, Badge } from 'antd'
 import ImsiManager from './ImsiManager'
 import Interfaces from './Interfaces'
+import Ports from './Ports'
 
 const { TabPane } = Tabs
 
@@ -54,7 +55,7 @@ export default function AdminPanel(){
         </TabPane>
 
         <TabPane tab="Физические порты" key="ports">
-          <Interfaces filterPhysical />
+          <Ports />
         </TabPane>
 
         <TabPane tab="IMSI" key="imsi">

@@ -603,6 +603,54 @@ app.get('/api/ports', requireAuth, (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }) }
 })
 
+// POST /api/ports - add physical port (appends to traffic_ports.info)
+app.post('/api/ports', requireAuth, (req, res) => {
+  try {
+    const p = '/etc/vepc/traffic_ports.info'
+    const { name, state, mac } = req.body || {}
+    if (!name || !name.length) return res.status(400).json({ ok: false, reason: 'missing name' })
+    let lines = []
+    if (fs.existsSync(p)) {
+      const data = fs.readFileSync(p, 'utf8')
+      lines = data.split(/\r?\n/).filter(Boolean)
+    }
+    // avoid duplicates
+    const exists = lines.find(l => (l.split('=')[0] || '') === name)
+    if (exists) return res.status(400).json({ ok: false, reason: 'port exists' })
+    const line = `${name}=${(state||'up')}|${(mac||'')}`
+    // append
+    fs.appendFileSync(p, line + '\n', { encoding: 'utf8' })
+    // return updated list
+    const data2 = fs.readFileSync(p, 'utf8')
+    const lines2 = data2.split(/\r?\n/).filter(Boolean)
+    const ports = lines2.map(l => {
+      const [k,v] = l.split('=')
+      const [st, m] = (v||'').split('|')
+      return { name: k, state: st||'unknown', mac: m||'' }
+    })
+    res.json({ ok: true, ports })
+  } catch (e) { res.status(500).json({ ok: false, reason: e.message }) }
+})
+
+// DELETE /api/ports/:name - remove physical port entry
+app.delete('/api/ports/:name', requireAuth, (req, res) => {
+  try {
+    const p = '/etc/vepc/traffic_ports.info'
+    const name = req.params.name
+    if (!fs.existsSync(p)) return res.status(404).json({ ok: false, reason: 'not found' })
+    const data = fs.readFileSync(p, 'utf8')
+    const lines = data.split(/\r?\n/).filter(Boolean)
+    const filtered = lines.filter(l => (l.split('=')[0] || '') !== name)
+    fs.writeFileSync(p, filtered.join('\n') + (filtered.length ? '\n' : ''), { encoding: 'utf8' })
+    const ports = filtered.map(l => {
+      const [k,v] = l.split('=')
+      const [st, m] = (v||'').split('|')
+      return { name: k, state: st||'unknown', mac: m||'' }
+    })
+    res.json({ ok: true, ports })
+  } catch (e) { res.status(500).json({ ok: false, reason: e.message }) }
+})
+
 // Parse runtime/state output into structured JSON
 function parseRuntime(text) {
   const lines = text.split(/\r?\n/)
