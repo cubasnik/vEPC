@@ -603,6 +603,21 @@ app.get('/api/ports', requireAuth, (req, res) => {
       }
     }
 
+    // also consider VEPC_TRAFFIC_PORTS env as authoritative list (comma separated)
+    if (process.env.VEPC_TRAFFIC_PORTS) {
+      const envList = String(process.env.VEPC_TRAFFIC_PORTS).split(/[,:\s]+/).filter(Boolean)
+      for (const n of envList) {
+        if (!trafficMap.has(n)) {
+          trafficMap.set(n, { name: n, state: 'unknown', mac: '', source: 'env' })
+        } else {
+          // mark existing entry as also coming from env
+          const ex = trafficMap.get(n)
+          ex.source = ex.source ? (ex.source + ',env') : 'env'
+          trafficMap.set(n, ex)
+        }
+      }
+    }
+
     // list system network interfaces when available
     let sysIfs = []
     try {
@@ -647,8 +662,15 @@ app.get('/api/ports', requireAuth, (req, res) => {
     // include any traffic file entries not present in sysfs
     for (const [k,t] of trafficMap.entries()) {
       if (seen.has(k)) continue
-      // If the port isn't present in sysfs, mark it as missing and do NOT allow edits.
-      ports.push({ name: k, state: t.state, mac: t.mac, editable: false, missing: true, type: 'traffic' })
+      // If the port isn't present in sysfs
+      const isEnv = (t.source || '').includes('env')
+      if (isEnv) {
+        // treat env-declared ports as editable even if missing in container sysfs
+        ports.push({ name: k, state: t.state, mac: t.mac, editable: true, missing: true, type: 'traffic' })
+      } else {
+        // traffic_file-only entries are missing and non-editable
+        ports.push({ name: k, state: t.state, mac: t.mac, editable: false, missing: true, type: 'traffic' })
+      }
     }
 
     res.json({ ok: true, ports })
