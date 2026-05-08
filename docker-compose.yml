@@ -60,6 +60,7 @@ services:
     volumes:
       - /tmp:/tmp:rw
       - /etc/vepc:/etc/vepc:ro
+      - /sys/class/net:/sys/class/net:ro
     restart: unless-stopped
     logging:
       driver: "json-file"
