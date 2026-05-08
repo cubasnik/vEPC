@@ -1,5 +1,5 @@
 import React from 'react'
-import { Card, Table, Button, Space, message, Spin, Modal } from 'antd'
+import { Card, Table, Button, Space, message, Spin, Modal, Form, Input, Select } from 'antd'
 
 export default function Interfaces({ filterPhysical = false }){
   const [ifaces, setIfaces] = React.useState([])
@@ -10,7 +10,7 @@ export default function Interfaces({ filterPhysical = false }){
   const [createVisible, setCreateVisible] = React.useState(false)
   const [ports, setPorts] = React.useState([])
   const [creating, setCreating] = React.useState(false)
-  const [form] = React.useState({ name: '', proto: 's1', address: '', phys: '' })
+  const [form] = Form.useForm()
 
   async function load(){
     setLoading(true)
@@ -53,17 +53,19 @@ export default function Interfaces({ filterPhysical = false }){
   ]
 
   function openCreate() { setFormDefaults(); setCreateVisible(true) }
-  function setFormDefaults(){ form.name=''; form.proto='s1'; form.address=''; form.phys=(ports[0] && ports[0].name) || '' }
+  function setFormDefaults(){ form.setFieldsValue({ name: '', proto: 's1', address: '', phys: (ports[0] && ports[0].name) || '' }) }
 
   async function doCreate(){
     try{
       setCreating(true)
-      const body = { name: form.name, proto: form.proto, address: form.address, phys: form.phys }
+      const values = await form.validateFields()
+      const body = { name: values.name, proto: values.proto, address: values.address, phys: values.phys }
       const res = await fetch('/api/interfaces', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) })
       const j = await res.json()
       if (!j.ok) throw new Error(j.reason || 'failed')
       message.success('Интерфейс создан')
       setCreateVisible(false)
+      form.resetFields()
       load()
     } catch(e){ message.error(e.message) } finally { setCreating(false) }
   }
@@ -96,23 +98,27 @@ export default function Interfaces({ filterPhysical = false }){
         </div>
       </Spin>
       <Modal title="Создать интерфейс" open={createVisible} onCancel={()=>setCreateVisible(false)} okText="Создать" onOk={doCreate} confirmLoading={creating}>
-        <div style={{display:'grid', gap:8}}>
-          <label>Имя</label>
-          <input value={form.name} onChange={e=>form.name=e.target.value} />
-          <label>Тип</label>
-          <select value={form.proto} onChange={e=>form.proto=e.target.value}>
-            <option value="s1">s1</option>
-            <option value="s11">s11</option>
-            <option value="s6a">s6a</option>
-            <option value="gtp">gtp</option>
-          </select>
-          <label>IP адрес</label>
-          <input value={form.address} onChange={e=>form.address=e.target.value} />
-          <label>Физический порт</label>
-          <select value={form.phys} onChange={e=>form.phys=e.target.value}>
-            {ports.map(p=> <option key={p.name} value={p.name}>{p.name} ({p.state})</option>)}
-          </select>
-        </div>
+        <Form form={form} layout="vertical">
+          <Form.Item name="name" label="Имя" rules={[{ required: true, message: 'Введите имя интерфейса' }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item name="proto" label="Тип" rules={[{ required: true }]}> 
+            <Select>
+              <Select.Option value="s1">s1</Select.Option>
+              <Select.Option value="s11">s11</Select.Option>
+              <Select.Option value="s6a">s6a</Select.Option>
+              <Select.Option value="gtp">gtp</Select.Option>
+            </Select>
+          </Form.Item>
+          <Form.Item name="address" label="IP адрес">
+            <Input />
+          </Form.Item>
+          <Form.Item name="phys" label="Физический порт">
+            <Select>
+              {ports.map(p=> <Select.Option key={p.name} value={p.name}>{p.name} ({p.state})</Select.Option>)}
+            </Select>
+          </Form.Item>
+        </Form>
       </Modal>
       <Modal title="Diagnostic details" open={diagModalVisible} onCancel={()=>setDiagModalVisible(false)} footer={null} width={800}>
         <div style={{whiteSpace:'pre-wrap', wordBreak:'break-word'}}>{diagModalContent}</div>
