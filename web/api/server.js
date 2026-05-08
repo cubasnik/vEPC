@@ -749,6 +749,52 @@ app.delete('/api/ports/:name', requireAuth, (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }) }
 })
 
+// POST /api/ports/:name/action - perform action on physical port (admin up/down, assign_ip, add_vlan)
+app.post('/api/ports/:name/action', requireAuth, async (req, res) => {
+  try {
+    const name = req.params.name
+    const body = req.body || {}
+    const action = body.action
+    if (!action) return res.status(400).json({ ok: false, reason: 'missing action' })
+
+    if (action === 'admin_up' || action === 'admin_down') {
+      // try via CLI (best-effort)
+      try {
+        const cmd = `set interface ${name} admin ${action === 'admin_up' ? 'up' : 'down'}\n`
+        await execCliCommand(cmd)
+        return res.json({ ok: true })
+      } catch (e) {
+        return res.status(500).json({ ok: false, reason: 'cli failed: ' + e.message })
+      }
+    }
+
+    if (action === 'assign_ip' || action === 'add_vlan') {
+      // create/update interface record in DB and attempt runtime write-through
+      const address = body.address || null
+      const vlan = body.vlan || null
+      await db.init()
+      const pool = await db.getPool()
+      if (action === 'assign_ip') {
+        // upsert physical interface with address
+        await pool.query('INSERT INTO interfaces (name, proto, address, phys_port) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE proto=VALUES(proto), address=VALUES(address), phys_port=VALUES(phys_port)', [name, 'physical', address || null, name])
+        try { await execCliCommand(`set interface ${name} address ${address || ''}\n`) } catch (e) {}
+        const [rows] = await pool.query('SELECT * FROM interfaces ORDER BY id ASC')
+        return res.json({ ok: true, interfaces: rows })
+      }
+      if (action === 'add_vlan') {
+        if (!vlan) return res.status(400).json({ ok: false, reason: 'missing vlan' })
+        const ifname = `${name}.${vlan}`
+        await pool.query('INSERT INTO interfaces (name, proto, address, phys_port) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE proto=VALUES(proto), address=VALUES(address), phys_port=VALUES(phys_port)', [ifname, 'vlan', address || null, name])
+        try { await execCliCommand(`set interface ${ifname} proto vlan phys ${name} address ${address || ''}\n`) } catch (e) {}
+        const [rows] = await pool.query('SELECT * FROM interfaces ORDER BY id ASC')
+        return res.json({ ok: true, interfaces: rows })
+      }
+    }
+
+    res.status(400).json({ ok: false, reason: 'unsupported action' })
+  } catch (e) { res.status(500).json({ ok: false, reason: e.message }) }
+})
+
 // Parse runtime/state output into structured JSON
 function parseRuntime(text) {
   const lines = text.split(/\r?\n/)

@@ -1,5 +1,5 @@
 import React from 'react'
-import { Card, Table, Button, Space, message, Spin, Modal, Form, Input, Tag } from 'antd'
+import { Card, Table, Button, Space, message, Spin, Modal, Form, Input, Tag, Dropdown, Menu } from 'antd'
 
 export default function Ports(){
   const [ports, setPorts] = React.useState([])
@@ -63,12 +63,37 @@ export default function Ports(){
     ) },
     { title: 'State', dataIndex: 'state', key: 'state' },
     { title: 'MAC', dataIndex: 'mac', key: 'mac' },
-    { title: 'Actions', key: 'a', render: (_, record) => (
-      <Space>
-        <Button size="small" disabled={!record.editable || record.missing} onClick={() => { form.resetFields(); setCreatingVlanFor(record) }}>Добавить VLAN</Button>
-        <Button size="small" disabled={!record.editable || record.missing} onClick={() => { form.resetFields(); setAssigningIpFor(record) }}>Назначить IP</Button>
-      </Space>
-    ) }
+    { title: 'Actions', key: 'a', render: (_, record) => {
+      const items = [
+        { key: 'enable', label: 'Включить' },
+        { key: 'disable', label: 'Выключить' },
+        { key: 'assign_ip', label: 'Назначить IP' },
+        { key: 'add_vlan', label: 'Добавить VLAN' }
+      ]
+      return (
+        <Space>
+          <Dropdown menu={{ items, onClick: async ({ key }) => {
+            if (key === 'assign_ip') {
+              form.resetFields(); setAssigningIpFor(record); return
+            }
+            if (key === 'add_vlan') {
+              form.resetFields(); setCreatingVlanFor(record); return
+            }
+            // enable/disable
+            const act = key === 'enable' ? 'admin_up' : 'admin_down'
+            try{
+              const res = await fetch('/api/ports/'+encodeURIComponent(record.name)+'/action', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ action: act }) })
+              const j = await res.json()
+              if (!j.ok) throw new Error(j.reason || 'action failed')
+              message.success('Action sent')
+              load()
+            } catch(e){ message.error(e.message) }
+          }}}>
+            <Button size="small" disabled={!record.editable && !record.missing}>Actions</Button>
+          </Dropdown>
+        </Space>
+      )
+    } }
   ]
 
   return (
