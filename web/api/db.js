@@ -48,6 +48,18 @@ async function init() {
   while (true) {
     try {
       await p.query(createSql)
+      // create interfaces table
+      const createIfSql = `
+    CREATE TABLE IF NOT EXISTS interfaces (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      name VARCHAR(128) NOT NULL,
+      proto VARCHAR(64) NOT NULL,
+      address VARCHAR(64),
+      phys_port VARCHAR(64),
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  `
+      await p.query(createIfSql)
       break
     } catch (err) {
       attempt += 1

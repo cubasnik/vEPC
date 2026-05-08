@@ -527,12 +527,80 @@ app.use('/api/ping', (req, res) => {
 // GET /api/interfaces - parse `show iface` output into structured JSON
 app.get('/api/interfaces', requireAuth, async (req, res) => {
   try {
+    // prefer DB-backed interfaces if available
+    try {
+      await db.init()
+      const pool = await db.getPool()
+      const [rows] = await pool.query('SELECT * FROM interfaces ORDER BY id ASC')
+      const mapped = rows.map(r => ({ id: r.id, name: r.name, proto: r.proto, address: r.address, implementation: r.phys_port || '', diagnostic: '' }))
+      return res.json({ ok: true, interfaces: mapped })
+    } catch (e) {
+      // fallback to runtime parsing
+    }
+
     const out = await execCliCommand('show iface\n')
     const ifaces = parseInterfaces(out)
     res.json({ ok: true, interfaces: ifaces })
   } catch (e) {
     res.status(500).json({ ok: false, reason: e.message })
   }
+})
+
+// POST /api/interfaces - create interface in DB and attempt runtime write-through
+app.post('/api/interfaces', requireAuth, async (req, res) => {
+  const body = req.body || {}
+  const name = String(body.name || '').trim()
+  const proto = String(body.proto || '').trim()
+  const address = String(body.address || '').trim()
+  const phys = String(body.phys || '').trim()
+  if (!name || !proto) return res.status(400).json({ ok: false, reason: 'missing name or proto' })
+  try {
+    await db.init()
+    const pool = await db.getPool()
+    await pool.query('INSERT INTO interfaces (name, proto, address, phys_port) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE proto=VALUES(proto), address=VALUES(address), phys_port=VALUES(phys_port)', [name, proto, address || null, phys || null])
+    // best-effort runtime: try to configure interface via CLI
+    try {
+      const cmd = `set interface ${name} proto ${proto} address ${address || ''} phys ${phys || ''}`
+      await execCliCommand(cmd + '\n')
+    } catch (e) { /* ignore */ }
+    const [rows] = await pool.query('SELECT * FROM interfaces ORDER BY id ASC')
+    res.json({ ok: true, interfaces: rows })
+  } catch (e) { res.status(500).json({ ok: false, reason: e.message }) }
+})
+
+// DELETE /api/interfaces/:id
+app.delete('/api/interfaces/:id', requireAuth, async (req, res) => {
+  const id = parseInt(req.params.id || '0', 10)
+  if (!id) return res.status(400).json({ ok: false, reason: 'missing id' })
+  try {
+    await db.init()
+    const pool = await db.getPool()
+    // fetch name for potential runtime clear
+    const [existing] = await pool.query('SELECT name FROM interfaces WHERE id = ?', [id])
+    if (existing && existing.length) {
+      const name = existing[0].name
+      await pool.query('DELETE FROM interfaces WHERE id = ?', [id])
+      try { await execCliCommand(`set interface ${name} delete\n`) } catch (e) {}
+    }
+    const [rows] = await pool.query('SELECT * FROM interfaces ORDER BY id ASC')
+    res.json({ ok: true, interfaces: rows })
+  } catch (e) { res.status(500).json({ ok: false, reason: e.message }) }
+})
+
+// GET /api/ports - list physical ports from config file
+app.get('/api/ports', requireAuth, (req, res) => {
+  try {
+    const p = '/etc/vepc/traffic_ports.info'
+    if (!fs.existsSync(p)) return res.json({ ok: true, ports: [] })
+    const data = fs.readFileSync(p, 'utf8')
+    const lines = data.split(/\r?\n/).filter(Boolean)
+    const ports = lines.map(l => {
+      const [k,v] = l.split('=')
+      const [state, mac] = (v||'').split('|')
+      return { name: k, state: state||'unknown', mac: mac||'' }
+    })
+    res.json({ ok: true, ports })
+  } catch (e) { res.status(500).json({ ok: false, reason: e.message }) }
 })
 
 // Parse runtime/state output into structured JSON
