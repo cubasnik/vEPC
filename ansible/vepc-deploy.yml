@@ -542,28 +542,7 @@
       when: vepc_redeploy_clean | bool
       become: yes
       block:
-        - name: Ensure backups directory exists in repository
-          file:
-            path: "{{ vepc_repo_path }}/backups"
-            state: directory
-            owner: "{{ vepc_user }}"
-            group: "{{ vepc_group }}"
-            mode: '0755'
-
-        - name: Create DB dump if vepc-db container exists (safe, idempotent)
-          shell: |
-            set -e
-            ts=$(date -u +"%Y%m%dT%H%M%SZ")
-            backup_file="{{ vepc_repo_path }}/backups/vepc-db-${ts}.sql.gz"
-            if docker ps -a --filter "name=vepc-db" -q | grep -q .; then
-              docker exec -i vepc-db sh -c 'exec mysqldump -uvepc -p"vepcpass" vepc' | gzip -9 > "$backup_file" || true
-              echo "$backup_file"
-            else
-              echo "no-container"
-            fi
-          register: db_dump
-          changed_when: db_dump.stdout is search('backups/vepc-db-')
-          failed_when: false
+        # (no backup requested) on clean redeploy we remove DB volumes to force a fresh DB
 
         - name: Remove known DB volume 'vepc-db-data' if present
           shell: |
