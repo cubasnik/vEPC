@@ -75,6 +75,21 @@ export default function Ports(){
     <Card title="Физические порты" extra={<Space><Button onClick={load}>Обновить</Button></Space>} style={{marginTop:12}}>
       <Spin spinning={loading}>
         <Table dataSource={ports} columns={columns} rowKey={r=>r.name} pagination={false} />
+        {(!loading && (!ports || ports.length === 0)) && (
+          <div style={{marginTop:12}}>
+            <div>Порты не найдены. Нажмите «Диагностика», чтобы узнать почему.</div>
+            <Space style={{marginTop:8}}>
+              <Button onClick={async ()=>{
+                try{
+                  const r = await fetch('/api/ports/debug')
+                  const j = await r.json()
+                  if (!j.ok) throw new Error(j.reason || 'diag failed')
+                  Modal.info({ title: 'Ports debug', width: 800, content: <pre style={{whiteSpace:'pre-wrap'}}>{JSON.stringify(j.info, null, 2)}</pre> })
+                } catch(e){ message.error(e.message) }
+              }}>Диагностика</Button>
+            </Space>
+          </div>
+        )}
 
         {creatingVlanFor && (
           <Modal title={`Добавить VLAN на ${creatingVlanFor.name}`} open onCancel={()=>setCreatingVlanFor(null)} onOk={() => createVlan(creatingVlanFor)}>

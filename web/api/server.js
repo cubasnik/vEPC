@@ -655,6 +655,30 @@ app.get('/api/ports', requireAuth, (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }) }
 })
 
+// GET /api/ports/debug - diagnostic info for troubleshooting why ports list may be empty
+app.get('/api/ports/debug', requireAuth, (req, res) => {
+  try {
+    const p = '/etc/vepc/traffic_ports.info'
+    const info = { sys_exists: false, sys_list: [], traffic_file_exists: false, traffic_file: null }
+    try {
+      const netPath = '/sys/class/net'
+      info.sys_exists = fs.existsSync(netPath)
+      if (info.sys_exists) {
+        info.sys_list = fs.readdirSync(netPath).filter(Boolean)
+      }
+    } catch (e) { info.sys_err = String(e) }
+
+    try {
+      info.traffic_file_exists = fs.existsSync(p)
+      if (info.traffic_file_exists) info.traffic_file = fs.readFileSync(p, 'utf8')
+    } catch (e) { info.traffic_err = String(e) }
+
+    // return environment and effective paths
+    info.env = { CLI_SOCKET: process.env.CLI_SOCKET || null, NODE_ENV: process.env.NODE_ENV || null }
+    res.json({ ok: true, info })
+  } catch (e) { res.status(500).json({ ok: false, reason: e.message }) }
+})
+
 // POST /api/ports - add physical port (appends to traffic_ports.info)
 app.post('/api/ports', requireAuth, (req, res) => {
   try {
