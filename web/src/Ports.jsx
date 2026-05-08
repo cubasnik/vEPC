@@ -1,5 +1,5 @@
 import React from 'react'
-import { Card, Table, Button, Space, message, Spin, Modal, Form, Input } from 'antd'
+import { Card, Table, Button, Space, message, Spin, Modal, Form, Input, Tag } from 'antd'
 
 export default function Ports(){
   const [ports, setPorts] = React.useState([])
@@ -58,13 +58,15 @@ export default function Ports(){
   }
 
   const columns = [
-    { title: 'Name', dataIndex: 'name', key: 'name' },
+    { title: 'Name', dataIndex: 'name', key: 'name', render: (t, r) => (
+      <span>{t} {r.missing ? <Tag color="red">missing</Tag> : (r.type === 'oam' ? <Tag>oam</Tag> : <Tag color="green">traffic</Tag>)}</span>
+    ) },
     { title: 'State', dataIndex: 'state', key: 'state' },
     { title: 'MAC', dataIndex: 'mac', key: 'mac' },
     { title: 'Actions', key: 'a', render: (_, record) => (
       <Space>
-        <Button size="small" disabled={!record.editable} onClick={() => { form.resetFields(); setCreatingVlanFor(record) }}>Добавить VLAN</Button>
-        <Button size="small" disabled={!record.editable} onClick={() => { form.resetFields(); setAssigningIpFor(record) }}>Назначить IP</Button>
+        <Button size="small" disabled={!record.editable || record.missing} onClick={() => { form.resetFields(); setCreatingVlanFor(record) }}>Добавить VLAN</Button>
+        <Button size="small" disabled={!record.editable || record.missing} onClick={() => { form.resetFields(); setAssigningIpFor(record) }}>Назначить IP</Button>
       </Space>
     ) }
   ]

@@ -647,7 +647,8 @@ app.get('/api/ports', requireAuth, (req, res) => {
     // include any traffic file entries not present in sysfs
     for (const [k,t] of trafficMap.entries()) {
       if (seen.has(k)) continue
-      ports.push({ name: k, state: t.state, mac: t.mac, editable: true, type: 'traffic' })
+      // If the port isn't present in sysfs, mark it as missing and do NOT allow edits.
+      ports.push({ name: k, state: t.state, mac: t.mac, editable: false, missing: true, type: 'traffic' })
     }
 
     res.json({ ok: true, ports })
