@@ -306,6 +306,19 @@ app.get('/api/imsi', requireAuth, async (req, res) => {
   }
 });
 
+// POST /api/imsi/seed - trigger seeding from mounted config file (best-effort)
+app.post('/api/imsi/seed', requireAuth, async (req, res) => {
+  try {
+    await db.init()
+    const pool = await db.getPool()
+    await seedFromConfig()
+    const [rows] = await pool.query('SELECT * FROM imsi_groups ORDER BY id ASC')
+    return res.json({ ok: true, groups: rows.map(r => ({ name: r.name, kind: r.kind, plmn: r.plmn, series: r.series, rangeStart: r.range_start, rangeEnd: r.range_end, apnProfile: r.apn_profile, count: r.cnt })) })
+  } catch (e) {
+    return res.status(500).json({ ok: false, reason: e.message })
+  }
+})
+
 // POST /api/imsi - create IMSI group (range or series)
 app.post('/api/imsi', requireAuth, async (req, res) => {
   const body = req.body || {};

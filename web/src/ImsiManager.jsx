@@ -12,6 +12,7 @@ function ApiFetch(path, opts = {}, token) {
 export default function ImsiManager() {
   const [groups, setGroups] = React.useState([])
   const [loading, setLoading] = React.useState(false)
+  const [seedLoading, setSeedLoading] = React.useState(false)
   const [token, setToken] = React.useState('')
   const [form] = Form.useForm()
   const [modalVisible, setModalVisible] = React.useState(false)
@@ -136,8 +137,19 @@ export default function ImsiManager() {
     setModalVisible(true)
   }
 
+  async function seedFromConfig() {
+    try {
+      setSeedLoading(true)
+      const res = await ApiFetch('/api/imsi/seed', { method: 'POST' }, token)
+      const j = await res.json()
+      if (!j.ok) throw new Error(j.reason || 'seed failed')
+      message.success('Seed выполнен, данные обновлены')
+      load()
+    } catch (e) { message.error(e.message) } finally { setSeedLoading(false) }
+  }
+
   return (
-    <Card title="Группы IMSI" extra={<Space><Input placeholder="API токен (необязательно)" value={token} onChange={e=>setToken(e.target.value)} style={{width:260}} /><Button onClick={load}>Перезагрузить</Button><Button type="primary" onClick={()=>{ form.resetFields(); setModalVisible(true); }}>Создать</Button></Space>}>
+    <Card title="Группы IMSI" extra={<Space><Input placeholder="API токен (необязательно)" value={token} onChange={e=>setToken(e.target.value)} style={{width:260}} /><Button onClick={load}>Перезагрузить</Button><Button onClick={seedFromConfig} loading={seedLoading}>Seed from config</Button><Button type="primary" onClick={()=>{ form.resetFields(); setModalVisible(true); }}>Создать</Button></Space>}>
       <Spin spinning={loading}>
         <Table rowKey="name" dataSource={groups} columns={columns} pagination={false} />
       </Spin>
