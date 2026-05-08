@@ -26,28 +26,7 @@ export default function Ports(){
 
   React.useEffect(()=>{ load() }, [])
 
-  async function addPhysicalPort(){
-    try{
-      const vals = await form.validateFields()
-      const res = await fetch('/api/ports', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(vals) })
-      const j = await res.json()
-      if (!j.ok) throw new Error(j.reason || 'failed')
-      message.success('Порт добавлен')
-      setAddingPortVisible(false)
-      form.resetFields()
-      load()
-    } catch(e){ message.error(e.message) }
-  }
-
-  async function deletePort(name){
-    try{
-      const res = await fetch('/api/ports/'+encodeURIComponent(name), { method: 'DELETE' })
-      const j = await res.json()
-      if (!j.ok) throw new Error(j.reason || 'delete failed')
-      message.success('Порт удалён')
-      load()
-    } catch(e){ message.error(e.message) }
-  }
+  // adding/deleting physical ports is not allowed from UI; only VLANs/IP may be assigned
 
   async function createVlan(parent){
     try{
@@ -84,15 +63,14 @@ export default function Ports(){
     { title: 'MAC', dataIndex: 'mac', key: 'mac' },
     { title: 'Actions', key: 'a', render: (_, record) => (
       <Space>
-        <Button size="small" onClick={() => { form.resetFields(); setCreatingVlanFor(record) }}>Добавить VLAN</Button>
-        <Button size="small" onClick={() => { form.resetFields(); setAssigningIpFor(record) }}>Назначить IP</Button>
-        <Button size="small" danger onClick={() => deletePort(record.name)}>Удалить</Button>
+        <Button size="small" disabled={!record.editable} onClick={() => { form.resetFields(); setCreatingVlanFor(record) }}>Добавить VLAN</Button>
+        <Button size="small" disabled={!record.editable} onClick={() => { form.resetFields(); setAssigningIpFor(record) }}>Назначить IP</Button>
       </Space>
     ) }
   ]
 
   return (
-    <Card title="Физические порты" extra={<Space><Button onClick={load}>Обновить</Button><Button type="primary" onClick={()=>{ form.resetFields(); setAddingPortVisible(true) }}>Добавить физический порт</Button></Space>} style={{marginTop:12}}>
+    <Card title="Физические порты" extra={<Space><Button onClick={load}>Обновить</Button></Space>} style={{marginTop:12}}>
       <Spin spinning={loading}>
         <Table dataSource={ports} columns={columns} rowKey={r=>r.name} pagination={false} />
 
@@ -115,21 +93,7 @@ export default function Ports(){
           </Modal>
         )}
 
-        {addingPortVisible && (
-          <Modal title="Добавить физический порт" open onCancel={()=>setAddingPortVisible(false)} onOk={addPhysicalPort}>
-            <Form form={form} layout="vertical">
-              <Form.Item name="name" label="Имя" rules={[{ required: true, message: 'Введите имя порта' }]}>
-                <Input />
-              </Form.Item>
-              <Form.Item name="state" label="State">
-                <Input defaultValue="up" />
-              </Form.Item>
-              <Form.Item name="mac" label="MAC (опционально)">
-                <Input />
-              </Form.Item>
-            </Form>
-          </Modal>
-        )}
+        {/* adding physical ports from UI is disabled by design */}
       </Spin>
     </Card>
   )

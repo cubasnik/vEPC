@@ -591,14 +591,65 @@ app.delete('/api/interfaces/:id', requireAuth, async (req, res) => {
 app.get('/api/ports', requireAuth, (req, res) => {
   try {
     const p = '/etc/vepc/traffic_ports.info'
-    if (!fs.existsSync(p)) return res.json({ ok: true, ports: [] })
-    const data = fs.readFileSync(p, 'utf8')
-    const lines = data.split(/\r?\n/).filter(Boolean)
-    const ports = lines.map(l => {
-      const [k,v] = l.split('=')
-      const [state, mac] = (v||'').split('|')
-      return { name: k, state: state||'unknown', mac: mac||'' }
-    })
+    // read traffic ports list (ports intended for traffic/vlan operations)
+    let trafficMap = new Map()
+    if (fs.existsSync(p)) {
+      const data = fs.readFileSync(p, 'utf8')
+      const lines = data.split(/\r?\n/).filter(Boolean)
+      for (const l of lines) {
+        const [k,v] = l.split('=')
+        const [state, mac] = (v||'').split('|')
+        trafficMap.set(k, { name: k, state: state||'unknown', mac: mac||'', source: 'traffic_file' })
+      }
+    }
+
+    // list system network interfaces when available
+    let sysIfs = []
+    try {
+      const netPath = '/sys/class/net'
+      if (fs.existsSync(netPath)) {
+        sysIfs = fs.readdirSync(netPath).filter(Boolean)
+      }
+    } catch (e) {
+      // ignore; fallback to traffic file only
+    }
+
+    const ports = []
+    const seen = new Set()
+    // prefer system list to preserve ordering
+    for (const ifname of sysIfs.length ? sysIfs : Array.from(trafficMap.keys())) {
+      let info = { name: ifname, state: 'unknown', mac: '' }
+      // try reading operstate and address
+      try {
+        const st = fs.readFileSync(`/sys/class/net/${ifname}/operstate`, 'utf8').trim()
+        info.state = st || info.state
+      } catch (e) {}
+      try {
+        const mac = fs.readFileSync(`/sys/class/net/${ifname}/address`, 'utf8').trim()
+        info.mac = mac || info.mac
+      } catch (e) {}
+      // if trafficMap has more authoritative entry, merge
+      if (trafficMap.has(ifname)) {
+        const t = trafficMap.get(ifname)
+        info.state = t.state || info.state
+        info.mac = t.mac || info.mac
+        info.editable = true
+        info.type = 'traffic'
+      } else {
+        // not in traffic list -> consider OAM/management (non-editable)
+        info.editable = false
+        info.type = 'oam'
+      }
+      ports.push(info)
+      seen.add(ifname)
+    }
+
+    // include any traffic file entries not present in sysfs
+    for (const [k,t] of trafficMap.entries()) {
+      if (seen.has(k)) continue
+      ports.push({ name: k, state: t.state, mac: t.mac, editable: true, type: 'traffic' })
+    }
+
     res.json({ ok: true, ports })
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }) }
 })
