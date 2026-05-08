@@ -53,10 +53,13 @@ services:
       # allow overriding the CLI socket path and wait timeout from compose
       CLI_SOCKET: /tmp/vepc.sock
       WAIT_FOR_SOCKET_TIMEOUT: 60
+      # ensure web sees traffic ports
+      VEPC_TRAFFIC_PORTS: 'ens192'
     ports:
       - "3000:3000"
     volumes:
       - /tmp:/tmp:rw
+      - /etc/vepc:/etc/vepc:ro
     restart: unless-stopped
     logging:
       driver: "json-file"
