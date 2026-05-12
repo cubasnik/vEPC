@@ -633,6 +633,13 @@ app.get('/api/ports', requireAuth, (req, res) => {
     const seen = new Set()
     // prefer system list to preserve ordering
     for (const ifname of sysIfs.length ? sysIfs : Array.from(trafficMap.keys())) {
+      // filter out bridge and docker/virtual interfaces by heuristic
+      try {
+        // skip kernel bridge devices
+        if (fs.existsSync(`/sys/class/net/${ifname}/bridge`)) continue
+      } catch (e) {}
+      // skip common docker/virtual interface name patterns
+      if (/^(br-|docker|veth|virbr|vnet|docker0|lxcbr|br[0-9]+).*/i.test(ifname)) continue
       let info = { name: ifname, state: 'unknown', mac: '' }
       // try reading operstate and address
       try {
