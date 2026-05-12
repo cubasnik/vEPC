@@ -635,11 +635,25 @@ app.get('/api/ports', requireAuth, (req, res) => {
     for (const ifname of sysIfs.length ? sysIfs : Array.from(trafficMap.keys())) {
       // filter out bridge and docker/virtual interfaces by heuristic
       try {
-        // skip kernel bridge devices
+        // skip kernel bridge devices (bridge directory present)
         if (fs.existsSync(`/sys/class/net/${ifname}/bridge`)) continue
       } catch (e) {}
       // skip common docker/virtual interface name patterns
-      if (/^(br-|docker|veth|virbr|vnet|docker0|lxcbr|br[0-9]+).*/i.test(ifname)) continue
+      const virtualNameRe = /^(br-|docker|veth|virbr|vnet|docker0|lxcbr|qbr|qvb|qvo|veth|tap|tun|vmnet).*/i
+      if (virtualNameRe.test(ifname)) continue
+      // if interface is enslaved to a master (bridge) whose name looks virtual, skip it
+      try {
+        const masterPath = `/sys/class/net/${ifname}/master`
+        if (fs.existsSync(masterPath)) {
+          try {
+            const link = fs.readlinkSync(masterPath)
+            const masterName = path.basename(link)
+            if (virtualNameRe.test(masterName) || /^br[0-9]*/i.test(masterName)) continue
+          } catch (e) {
+            // ignore readlink failures
+          }
+        }
+      } catch (e) {}
       let info = { name: ifname, state: 'unknown', mac: '' }
       // try reading operstate and address
       try {
